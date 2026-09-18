@@ -19,4 +19,9 @@ export const env = {
   LOG_LEVEL: process.env.LOG_LEVEL || 'info',
   NODE_ENV: process.env.NODE_ENV || 'development',
   STORE_BASE_URL: process.env.STORE_BASE_URL || 'https://demo.inelabteamdev.com',
+  // Cron endpoint auth. Unset => the endpoint fails closed (rejects every call).
+  CRON_SECRET: process.env.CRON_SECRET || '',
+  // The service's own public URL, used to self-ping /health during a run so Render doesn't sleep
+  // mid-run. Unset => no self-ping (fine for local dev).
+  SELF_URL: process.env.SELF_URL || '',
 };

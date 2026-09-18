@@ -43,7 +43,11 @@ These are the grading criteria restated as rules. Never break one to make a phas
 
 ## Working rules
 
-- One phase per session. Finish it, run its verify command, commit, then `/clear`.
+- One phase per session. Finish it, run its verify command, then stop. The user makes every
+  commit — never run `git commit` or `git push`, in any session.
+- Never apply a migration or run any write (DDL or DML) against the live Supabase database. Write
+  the migration file under `db/migrations/` and tell the user to run it. Local databases are fine
+  for writes and for running `verify:scrape` / `scrape:once`.
 - Before writing code for a phase, restate its exit criteria from `docs/PLAN.md` in one line.
 - After each phase, tick the boxes in `docs/PLAN.md` and add anything you got wrong to `NOTES.md`.
 - When you are unsure how the store behaves, go look at the real response. Do not guess a selector.

@@ -10,9 +10,14 @@
     "dev": "tsx watch src/index.ts",
     "start": "tsx src/index.ts",
     "crawl": "tsx scripts/catalog-crawl.ts",
+    "scrape:once": "tsx scripts/scrape-once.ts",
+    "cron:local": "tsx scripts/cron-local.ts",
+    "verify:scrape": "tsx scripts/verify-scrape.ts",
+    "fake-store": "tsx scripts/fake-store.ts",
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {
+    "cheerio": "^1.2.0",
     "dotenv": "^18.0.0",
     "express": "^4.21.2",
     "pino": "^9.5.0",

@@ -1,11 +1,11 @@
 -- INE price tracker schema. Run in the Supabase SQL editor.
 
 create extension if not exists "pgcrypto";
+create extension if not exists pg_trgm;
 
 create type scrape_status as enum ('success', 'retried', 'failed', 'skipped_recent');
 create type stock_status  as enum ('in_stock', 'low_stock', 'out_of_stock');
 create type run_trigger   as enum ('cron', 'manual', 'headed');
-create type rung          as enum ('json_api', 'embedded_json', 'dom', 'regex');
 
 create table products (
   id                    uuid primary key default gen_random_uuid(),
@@ -19,9 +19,23 @@ create table products (
   last_attempt_at       timestamptz,
   last_success_at       timestamptz,
   consecutive_failures  integer     not null default 0,
-  last_winning_rung     rung,
+  last_layout_revision  integer,
   layout_alert          boolean     not null default false,
   created_at            timestamptz not null default now()
+);
+
+-- Local mirror of the store catalogue. Built by scripts/catalog-crawl.ts, searched with ILIKE.
+create table store_catalog (
+  id            int primary key,          -- the store's own product id (1..1000)
+  slug          text,
+  name          text        not null,
+  brand         text,
+  category      text,
+  sku           text,
+  description   text,
+  first_seen_at timestamptz not null default now(),
+  last_seen_at  timestamptz not null default now(),
+  missing       boolean     not null default false
 );
 
 create table scrape_runs (
@@ -41,14 +55,16 @@ create table price_history (
   id           uuid primary key default gen_random_uuid(),
   product_id   uuid not null references products(id) on delete cascade,
   run_id       uuid references scrape_runs(id) on delete set null,
-  price        numeric(12,2) not null check (price > 0 and price < 1000000),
-  currency     text not null default 'USD',
-  stock        stock_status not null,
-  stock_qty    integer,
-  rung         rung not null,
-  raw_price    text not null,
-  anomalous    boolean not null default false,
-  scraped_at   timestamptz not null default now()
+  price             numeric(12,2) not null check (price > 0 and price < 1000000),
+  currency          text not null default 'INR',
+  stock             stock_status not null,
+  stock_qty         integer,
+  layout_revision   int,
+  layout_variant    int,
+  extraction_source text,
+  raw_price         text not null,
+  anomalous         boolean not null default false,
+  scraped_at        timestamptz not null default now()
 );
 
 -- One row per attempt. Failures included, on purpose.
@@ -56,15 +72,17 @@ create table scrape_logs (
   id            uuid primary key default gen_random_uuid(),
   product_id    uuid not null references products(id) on delete cascade,
   run_id        uuid references scrape_runs(id) on delete set null,
-  attempt_no    integer not null,
-  status        scrape_status not null,
-  fetcher       text not null,
-  rung          rung,
-  http_status   integer,
-  duration_ms   integer not null,
-  error_code    text,
-  error_message text,
-  created_at    timestamptz not null default now()
+  attempt_no        integer not null,
+  status            scrape_status not null,
+  fetcher           text not null,
+  layout_revision   int,
+  layout_variant    int,
+  extraction_source text,
+  http_status       integer,
+  duration_ms       integer not null,
+  error_code        text,
+  error_message     text,
+  created_at        timestamptz not null default now()
 );
 
 create table alerts (
@@ -81,6 +99,7 @@ create index price_history_product_time on price_history (product_id, scraped_at
 create index scrape_logs_product_time   on scrape_logs   (product_id, created_at desc);
 create index scrape_logs_run            on scrape_logs   (run_id);
 create index products_enabled           on products      (tracking_enabled) where tracking_enabled;
+create index store_catalog_name_trgm    on store_catalog using gin (name gin_trgm_ops);
 
 -- Latest snapshot per product, for the dashboard.
 create view product_latest as
