@@ -7,6 +7,10 @@ Read this before doing anything. Then read `docs/PLAN.md` to find the current ph
 A price tracker for INE's mock storefront at https://demo.inelabteamdev.com/. A user searches the
 store, picks a product, and the app scrapes its price and stock every 2 hours and shows the history.
 
+The product price sits behind a WASM proof-of-work at /api/challenge and a signed short-lived
+bearer token, so the price path runs in a browser and the catalogue path does not. docs/STORE.md is
+the authority on how the store behaves and supersedes older docs where they conflict.
+
 This is a hiring assignment. It is graded almost entirely on **scraper reliability**, not on UI.
 Deadline: 2026-09-20, 23:59 IST. Submission goes out Sunday morning, so treat Saturday night as done.
 
@@ -17,12 +21,12 @@ Deadline: 2026-09-20, 23:59 IST. Submission goes out Sunday morning, so treat Sa
 | Frontend | React + Vite + TypeScript + Tailwind | Vercel |
 | Backend | Node 20 + Express + TypeScript | Render (free) |
 | DB | Supabase Postgres | Supabase |
-| Scrape (scheduled) | undici + cheerio | runs on Render |
+| Scrape (scheduled) | Playwright | runs on Render |
+| Catalogue + metadata | undici + cheerio (/api/catalog, /api/product/{id}, /api/layout only) | runs on Render |
 | Scrape (headed demo) | Playwright | local only |
 | Cron | cron-job.org hitting an HTTP endpoint | external |
 
 No ORM. Use the `postgres` client or `@supabase/supabase-js` and plain SQL. No Next.js.
-Playwright is a devDependency only and must never be imported by the cron code path.
 
 ## Hard invariants
 

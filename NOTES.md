@@ -7,11 +7,23 @@ something that reads fake, because it is.
 Format:
 
 ```
-## [phase] short title
-**What it did:** the wrong version, with the actual code or behaviour
-**Why it was wrong:** the failure it would have caused in production
-**How it was caught:** verify harness / real run / reading the code
-**Fix:** what changed
+## [phase 0] Concluded there was no price endpoint
+**What it did:** grepped the bundle for "/api/" literals, found exactly three endpoints,
+and concluded the price was computed client-side.
+**Why it was wrong:** three more endpoints are assembled from a string lookup table
+(fetch(n(566)+n(536)+"ge") = /api/challenge) and never appear as literals.
+**How it was caught:** clicking Reveal price with the Network tab open showed
+challenge -> session -> price.
+**Fix:** treat a literal grep as a lower bound on endpoints, not a complete list.
+
+## [phase 0] The obvious price selector returns a wrong number
+**What it did:** .price-value and [data-price] are present in the DOM and contain
+plausible prices.
+**Why it was wrong:** both are display:none decoys holding format(Br(shown)) where
+Br scales the true price by 0.6 to 1.3. Wrong by up to 30% with no visible symptom.
+**How it was caught:** reading the bundle, then confirming on product 647
+(45,813 struck, 23,823 real, 48% off checks out).
+**Fix:** read only the element carrying layout.classes.priceValue.
 ```
 
 Worth capturing when it happens: selectors invented instead of read from the real DOM, retry

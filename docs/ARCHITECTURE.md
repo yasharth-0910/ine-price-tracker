@@ -1,5 +1,8 @@
 # ARCHITECTURE
 
+Read CLAUDE.md, docs/PLAN.md and docs/STORE.md. STORE.md (the recon) supersedes this file where
+they conflict; this document has been reconciled to it.
+
 ## Shape
 
 ```
@@ -12,8 +15,11 @@ Vercel (React)  --REST-->  Render
 
 ## The one idea worth explaining
 
-There is a single scrape core. The only thing that varies between the scheduled run and the headed
-demo is which fetcher gets injected.
+There is a single scrape core. HTTP fetches the catalogue and metadata (`/api/catalog`,
+`/api/product/{id}`, `/api/layout`); the price reveal is a browser path in every run, because the
+price sits behind a per-request WASM proof-of-work and a signed short-lived token (see STORE.md).
+So `BrowserFetcher` is the primary fetcher for the price, scheduled and demo alike. The only thing
+that varies between the scheduled run and the headed demo is whether that browser runs headless.
 
 ```ts
 interface Fetcher {
@@ -25,28 +31,28 @@ interface Fetcher {
 type FetchResult = { status: number; body: string; elapsedMs: number; finalUrl: string };
 ```
 
-`HttpFetcher` is undici with a timeout and a real user agent. `BrowserFetcher` is Playwright,
-waits for the price node to appear, then hands back `page.content()`. Retry, extraction,
-validation and persistence sit above both and do not know which one they got.
+`HttpFetcher` is undici with a timeout and a real user agent, used for the JSON endpoints only.
+`BrowserFetcher` is Playwright: it loads `/product/{id}`, drives the interaction gate, clicks
+Reveal, lets the page solve its own challenge, waits for `price-success`, then hands back
+`page.content()`. Retry, extraction, validation and persistence sit above both and do not know
+which one they got.
 
 This matters for the recording. The headed run shows the same retry ladder the cron uses, not a
 separate script written to look good on camera.
 
-## Extraction ladder
+## Price extraction
 
-Rungs are tried in order. First one that produces a valid price wins. The rung that won is stored
-on both the history row and the log row.
+No rung ladder. The price is read from one place: the element carrying `classes.priceValue`.
 
-| rung | strategy | notes |
-|---|---|---|
-| 1 | `json_api` | direct call to the store's data endpoint if one exists |
-| 2 | `embedded_json` | JSON inside a `<script>` tag in the HTML |
-| 3 | `dom` | cheerio selectors against the rendered markup |
-| 4 | `regex` | currency pattern over the text content, last resort |
+- Selectors come from `/api/layout`, cached until its `validUntil`, never hardcoded. Class names
+  rotate per window, so the map is fetched at scrape time and reused until it expires.
+- The price is the text of the element with class `layout.classes.priceValue`, normalised (see the
+  parser in STORE.md) and validated.
+- `.price-value` and `[data-price]` are an explicit deny list. They are `display:none` decoys
+  holding a copy of the real price scaled by 0.6 to 1.3 — plausible and wrong. Never read them.
 
-Structure-change detection falls out of this for free. Store the winning rung per product. If a
-product that has been succeeding on rung 1 starts succeeding on rung 3, or starts failing rung 1
-entirely, set `layout_alert = true` and surface it on the dashboard.
+Structure-change detection: store `revision` and `variant` from `/api/layout` on every scrape row.
+A change in either is a structure change; set `layout_alert = true` and surface it on the dashboard.
 
 ## Retry policy
 
@@ -55,7 +61,8 @@ entirely, set `layout_alert = true` and surface it on the dashboard.
 - Per-attempt timeout 10s via `AbortController`. Total per-product budget 45s, hard stop.
 - Retry on: `timeout`, `network`, `http_5xx`, `http_429`, `parse_empty`, `parse_invalid`.
 - Do not retry on: `http_404`. Log it, mark the product, move on.
-- Concurrency limit 3 products at a time. Render free has 512MB and the store is not ours to hammer.
+- Concurrency 1: one product at a time, sharing a single browser context for the whole run.
+  Chromium will not fit in 512MB at concurrency 3, and the store is not ours to hammer.
 
 ## Validation gate
 
@@ -70,6 +77,14 @@ Runs after extraction, before any write. Reject and treat as a failed attempt if
 Anomaly, not rejection: if the price moved more than 60% from the last known value, still store it
 but set `anomalous = true`. The store changes prices frequently by design, so refusing outliers
 would throw away real data. Flagging is honest, dropping is not.
+
+## What the scrape log records
+
+Each attempt writes one `scrape_logs` row. Beyond the pass/fail outcome and error code, the row
+carries the HTTP status of the underlying `/api/products/{id}/price` call, captured from
+Playwright's `response` event on the page, not inferred from the top-level page load. That call is
+where the injected failures live — an observed reveal returned 503 then succeeded on retry — so a
+200 page hosting a 503 price request must read as the failure it is.
 
 ## Scheduling on a sleeping free tier
 
@@ -94,7 +109,7 @@ backend/src/
   scrape/
     core.ts         orchestrate: attempt loop, backoff, persist
     fetchers/       http.ts  browser.ts
-    extract/        ladder.ts  rungs.ts  parsePrice.ts  parseStock.ts
+    extract/        layout.ts  parsePrice.ts  parseStock.ts
     validate.ts
     store-client.ts search + product url building
   db/               client.ts  queries.ts
@@ -107,9 +122,12 @@ backend/scripts/
 
 ## Trade-offs to write up in the design note
 
-- HTTP + cheerio for the schedule, Playwright only for the demo. A browser per product every 2
-  hours would not survive a 512MB free instance, and it isn't needed if the data is reachable.
+- Playwright for the price in every run, HTTP for the catalogue and metadata. The price is behind
+  a per-request WASM proof-of-work and a signed token, so a browser is the reliable path; the
+  catalogue is plain JSON and needs no browser. Concurrency 1 with a shared context keeps a single
+  Chromium inside the 512MB free instance.
 - Retrying a parse failure treats a 200 with missing content as an error. Costs a few extra
   requests, prevents the entire class of silently-empty history rows.
 - Flagging anomalies instead of rejecting them. Losing a real 70% price drop would be worse than
   storing one with a flag on it.
+

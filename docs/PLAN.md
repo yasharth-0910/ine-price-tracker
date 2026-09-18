@@ -28,13 +28,18 @@ Nothing else starts until this is written.
 
 **Exit:** the Render URL returns `{ ok: true }` and the DB ping is real.
 
-## Phase 2 — Store client
+## Phase 2 — Store client and catalogue mirror
 
-- [ ] `store-client.ts`: search by partial name, build a product URL, fetch one product
-- [ ] `GET /api/store/search?q=` works against the live store
+- [ ] `catalog-crawl.ts`: walk `/api/product/{id}` for ids 1..1000 and upsert each into a
+      `store_catalog` table. `/api/catalog` returns randomised order and caps `pageSize` at 60,
+      so paging cannot guarantee coverage; crawl by id instead.
+- [ ] `store-client.ts`: search by partial name against `store_catalog` with `ILIKE`, build a
+      product URL, fetch one product
+- [ ] `GET /api/store/search?q=` runs against the cached catalogue (the store has no search endpoint)
 - [ ] Handles an empty query, a query with no matches, and the store being slow
 
-**Exit:** `curl "$API/api/store/search?q=a"` returns real products from the live store.
+**Exit:** `curl "$API/api/store/search?q=a"` returns real products, and `store_catalog` holds
+1000 distinct rows.
 
 ## Phase 3 — Scrape core
 
@@ -50,21 +55,27 @@ Nothing else starts until this is written.
 
 ## Phase 4 — Fault-injection harness (write this before Phase 3 code)
 
-`scripts/chaos-server.ts` serves fake store pages and misbehaves on demand.
-`scripts/verify-scrape.ts` points the core at it and asserts the invariants.
+`scripts/chaos-server.ts` serves a local fake `/product/{id}` page plus its `/api/layout`,
+`/api/challenge`, `/api/session` and `/api/products/{id}/price` responses. It no longer
+misbehaves on demand: the price path is a browser path now, so `scripts/verify-scrape.ts`
+drives the `BrowserFetcher` against the fake page and injects every fault with Playwright's
+`page.route()` on the `/api/products/{id}/price` request, not with a plain HTTP chaos server.
 
-Cases:
+Cases (faults injected via `page.route()` on the price request unless noted):
 
 - [ ] happy path, one attempt, one history row, one log row, status `success`
 - [ ] 500 then 500 then 200 -> one history row, three log rows, status `retried`
 - [ ] 500 x3 -> zero history rows, three log rows, status `failed`
 - [ ] slow response past the timeout -> `timeout` error code, retried
-- [ ] 200 with the price node missing -> `parse_empty`, retried, not stored
-- [ ] 200 with price `"N/A"` -> `parse_invalid`, not stored
-- [ ] price appears only after a 3s delay -> succeeds on the browser fetcher
+- [ ] price node missing (element under `classes.priceValue` absent) -> `parse_empty`, retried, not stored
+- [ ] price `"N/A"` under `classes.priceValue` -> `parse_invalid`, not stored
+- [ ] price request delayed 3s (via `page.route()`) -> succeeds on the browser fetcher
 - [ ] 404 -> one attempt only, no retry
 - [ ] two runs in the same window -> second logs `skipped_recent`, no duplicate row
 - [ ] product B succeeds while product A fails in the same run
+- [ ] a click is silently dropped (injected in the fake page's Reveal handler, mimicking `Xn`):
+      the price block stays `price-idle`, no price request fires, and the scraper re-clicks
+      rather than re-requests
 
 **Exit:** `npm run verify:scrape` prints all green and exits 0.
 
@@ -103,6 +114,10 @@ Cases:
 ## Phase 8 — Docs and submit
 
 - [ ] README: setup, env vars, schedule, deploy steps, architecture summary
+- [ ] README must also state (a) why the price path uses a browser while the catalogue path does
+      not — the price sits behind a WASM proof-of-work at `/api/challenge`, the catalogue is plain
+      JSON; and (b) that product search runs against a locally cached mirror of the store's own
+      catalogue, because the store exposes no search endpoint
 - [ ] Design note from `NOTES.md`: reliability decisions, trade-offs, AI mistakes and fixes
 - [ ] Bonus if time is left, in this order: price-drop alerts, per-product interval, GitHub Actions CI
 - [ ] Repo public, live links checked from a logged-out browser
