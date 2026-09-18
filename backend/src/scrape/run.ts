@@ -19,6 +19,7 @@ export interface RunResult {
   succeeded: number;
   failed: number;
   skipped: number;
+  slowestAttemptMs: number;
 }
 
 // Ping our own /health every 4 minutes so a long run doesn't let the free instance spin down.
@@ -75,6 +76,15 @@ export async function executeRun(
       where id = ${runId}`;
   }
 
-  logger.info({ runId, total: products.length, ...counts }, 'scrape run finished');
-  return { total: products.length, ...counts };
+  // Slowest single attempt in the run. Over many unattended runs this is the number that says
+  // whether the per-attempt timeout budget still has headroom (a value near the timeout = trouble).
+  const [slowest] = await sql<{ max: number | null }[]>`
+    select max(duration_ms) as max from scrape_logs where run_id = ${runId}`;
+  const slowestAttemptMs = slowest?.max ?? 0;
+
+  logger.info(
+    { runId, total: products.length, ...counts, slowest_attempt_ms: slowestAttemptMs },
+    'scrape run finished',
+  );
+  return { total: products.length, ...counts, slowestAttemptMs };
 }
