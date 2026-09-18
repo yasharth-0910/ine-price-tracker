@@ -1,0 +1,16 @@
+services:
+  - type: web
+    name: ine-price-tracker-api
+    runtime: node
+    plan: free
+    rootDir: backend
+    buildCommand: npm install && npx playwright install --with-deps chromium
+    startCommand: npm start
+    healthCheckPath: /health
+    envVars:
+      - key: NODE_VERSION
+        value: "20"
+      - key: NODE_ENV
+        value: production
+      - key: DATABASE_URL
+        sync: false

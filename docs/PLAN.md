@@ -3,7 +3,7 @@
 The loop state. Claude Code reads this at the start of every session and updates it at the end.
 Work one phase at a time. A phase is done when its exit check passes, not when the code looks right.
 
-Current phase: **0**
+Current phase: **1** (skeleton built; Supabase + Render provisioning still open)
 
 ---
 
@@ -21,12 +21,14 @@ Nothing else starts until this is written.
 
 ## Phase 1 — Skeleton and database
 
-- [ ] Repo, two workspaces (`backend`, `frontend`), TypeScript, eslint, `.env.example`
-- [ ] Supabase project, run `db/schema.sql`
-- [ ] `db/client.ts` connects, `GET /health` returns ok with a live DB ping
-- [ ] Deploy backend to Render now, before there is anything worth deploying
+- [x] Repo, two workspaces (`backend`, `frontend`), TypeScript, `.env.example` (eslint skipped for now)
+- [ ] Supabase project, run `db/schema.sql` (manual — needs a real `DATABASE_URL`)
+- [x] `db/client.ts` connects, `GET /health` returns ok with a live DB ping (ping is real: 503 when DB is unreachable, verified)
+- [ ] Deploy backend to Render now, before there is anything worth deploying (`render.yaml` ready)
 
 **Exit:** the Render URL returns `{ ok: true }` and the DB ping is real.
+Skeleton + real ping done and verified locally. Remaining before this exit passes: provision
+Supabase, run `db/schema.sql`, set `DATABASE_URL`, and deploy via `render.yaml`.
 
 ## Phase 2 — Store client and catalogue mirror
 

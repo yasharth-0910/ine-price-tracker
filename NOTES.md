@@ -33,3 +33,12 @@ handler doing work before responding and timing out, a "success" logged when the
 with an empty product body.
 
 ---
+
+## [phase 1] Frontend `import App from './App.tsx'` broke the build
+**What it did:** wrote the entry import with the `.tsx` extension, as it reads more explicit.
+**Why it was wrong:** with `allowImportingTsExtensions` off (the default, and correct for a
+`vite build` that emits `.js`), TypeScript rejects a `.tsx` import path — TS5097.
+**How it was caught:** `npm run build` (tsc -b) failed; the dev server would have hidden it.
+**Fix:** import extensionless (`from './App'`). Build passes.
+
+---
