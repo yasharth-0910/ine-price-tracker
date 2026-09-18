@@ -18,4 +18,5 @@ export const env = {
   PORT: Number(process.env.PORT) || 4000,
   LOG_LEVEL: process.env.LOG_LEVEL || 'info',
   NODE_ENV: process.env.NODE_ENV || 'development',
+  STORE_BASE_URL: process.env.STORE_BASE_URL || 'https://demo.inelabteamdev.com',
 };
