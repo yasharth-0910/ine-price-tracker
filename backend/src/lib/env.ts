@@ -1,5 +1,6 @@
 // Validated at boot. Missing required vars exit the process naming each one,
 // so a misconfigured deploy fails loudly instead of half-starting.
+import "dotenv/config";
 
 const required = ['DATABASE_URL'] as const;
 
