@@ -44,7 +44,6 @@ export function RunStrip({
   for (const r of runs) {
     const w = windowStartOf(new Date(r.started_at).getTime());
     const existing = byWindow.get(w);
-    // Keep the latest run if two fell in the same window.
     if (!existing || new Date(r.started_at) > new Date(existing.started_at)) byWindow.set(w, r);
   }
 
@@ -54,74 +53,57 @@ export function RunStrip({
     return { start, run: byWindow.get(start) };
   });
 
-  let okCount = 0;
-  let partialCount = 0;
-  let failedCount = 0;
-  let emptyCount = 0;
-
-  for (const { run } of windows) {
-    if (!run) {
-      emptyCount++;
-    } else {
-      const outcome = runOutcome(run);
-      if (outcome === 'ok') okCount++;
-      else if (outcome === 'partial') partialCount++;
-      else if (outcome === 'failed') failedCount++;
-    }
-  }
-
   const nextRunLabel = nextRun
     ? `Next run ${formatTimestamp(nextRun.toISOString())}`
     : 'Next run pending';
 
   return (
-    <section className="flex flex-col space-y-2.5 rounded border border-rule bg-surface p-3">
-      <div className="flex items-center justify-between text-[13px]">
-        <span className="font-medium text-ink">Scrape history (last 72 hours)</span>
-        <span className="font-mono text-muted">2-hour execution windows</span>
-      </div>
+    <div className="w-full shrink-0 select-none border-b border-rule bg-surface px-3 py-1.5 font-mono text-[11px]">
+      <div className="flex flex-col justify-between gap-2 sm:flex-row sm:items-center">
+        <div className="flex items-center gap-2 truncate text-muted">
+          <span className="font-medium text-ink">System run strip</span>
+          <span className="text-rule">·</span>
+          <span className="truncate">
+            72h horizon (36 windows × 2h) · {nextRunLabel} · {productCount} {productCount === 1 ? 'product' : 'products'}
+          </span>
+        </div>
 
-      <div className="grid w-full grid-cols-12 gap-1 pt-1 sm:grid-cols-18 md:grid-cols-36">
-        {windows.map(({ start, run }) => {
-          const title = run
-            ? `${formatTimestamp(run.started_at)} — ${run.succeeded} ok, ${run.failed} failed`
-            : `${formatTimestamp(new Date(start).toISOString())} — pending / no run`;
-          return (
-            <div
-              key={start}
-              title={title}
-              className={
-                'h-6 rounded-[2px] transition-opacity hover:opacity-80 ' +
-                (run ? FILL[runOutcome(run)] : 'border border-rule bg-transparent')
-              }
-            />
-          );
-        })}
-      </div>
+        {/* 36 Run Strip Ticks Matrix + Legend */}
+        <div className="flex shrink-0 items-center gap-3">
+          <div className="flex items-center gap-0.5">
+            {windows.map(({ start, run }) => {
+              const title = run
+                ? `${formatTimestamp(run.started_at)} — ${run.succeeded} ok, ${run.failed} failed`
+                : `${formatTimestamp(new Date(start).toISOString())} — pending window`;
+              return (
+                <span
+                  key={start}
+                  title={title}
+                  className={
+                    'h-3.5 w-1.5 rounded-[1px] transition-opacity hover:opacity-75 ' +
+                    (run ? FILL[runOutcome(run)] : 'border border-rule bg-bg')
+                  }
+                />
+              );
+            })}
+          </div>
 
-      <div className="flex flex-col gap-2 pt-1 sm:flex-row sm:items-center sm:justify-between">
-        <span className="font-mono text-[13px] tabular-nums text-muted">
-          {nextRunLabel}, {productCount} {productCount === 1 ? 'product' : 'products'}
-        </span>
-        <div className="flex flex-wrap items-center gap-3 font-mono text-[11px] text-muted">
-          <div className="flex items-center gap-1.5">
-            <span className="h-2 w-2 rounded-[1px] bg-ok" />
-            <span>{okCount} successful</span>
-          </div>
-          <div className="flex items-center gap-1.5">
-            <span className="h-2 w-2 rounded-[1px] bg-retried" />
-            <span>{partialCount} retried</span>
-          </div>
-          <div className="flex items-center gap-1.5">
-            <span className="h-2 w-2 rounded-[1px] bg-failed" />
-            <span>{failedCount} error</span>
-          </div>
-          <div className="flex items-center gap-1.5">
-            <span className="h-2 w-2 rounded-[1px] border border-rule" />
-            <span>{emptyCount} queued</span>
+          <div className="hidden items-center gap-2 border-l border-rule pl-2 text-[10px] text-muted xl:flex">
+            <span className="flex items-center gap-1">
+              <span className="h-2 w-1.5 rounded-sm bg-ok" /> ok
+            </span>
+            <span className="flex items-center gap-1">
+              <span className="h-2 w-1.5 rounded-sm bg-retried" /> retry
+            </span>
+            <span className="flex items-center gap-1">
+              <span className="h-2 w-1.5 rounded-sm bg-failed" /> fail
+            </span>
+            <span className="flex items-center gap-1">
+              <span className="h-2 w-1.5 rounded-sm border border-rule bg-bg" /> queue
+            </span>
           </div>
         </div>
       </div>
-    </section>
+    </div>
   );
 }

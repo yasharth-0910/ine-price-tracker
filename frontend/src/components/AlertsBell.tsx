@@ -62,6 +62,16 @@ export function AlertsBell() {
     }
   }
 
+  async function markAllSeen() {
+    try {
+      await api.markAllAlertsSeen();
+      setAlerts((a) => a.map((x) => ({ ...x, seen: true })));
+      setUnseen(0);
+    } catch {
+      /* ignore failed batch */
+    }
+  }
+
   return (
     <div className="relative">
       <button
@@ -71,11 +81,12 @@ export function AlertsBell() {
           setOpen(next);
           if (next) void load();
         }}
-        className="rounded border border-rule bg-bg px-space-md py-1 font-mono text-mono-sm text-ink transition-colors hover:bg-surface-hover"
+        className="flex h-7 items-center gap-1.5 rounded border border-rule bg-surface px-2 font-mono text-[11px] text-ink transition-colors hover:bg-surface-hover"
       >
-        Alerts
+        <span className="text-retried">🔔</span>
+        <span>Alerts</span>
         {unseen > 0 && (
-          <span className="ml-1.5 rounded-sm border border-failed px-1.5 font-medium text-failed">{unseen}</span>
+          <span className="rounded bg-retried/20 px-1 text-[10px] font-bold text-retried">{unseen}</span>
         )}
       </button>
 
@@ -86,46 +97,57 @@ export function AlertsBell() {
             type="button"
             aria-label="Close alerts"
             onClick={() => setOpen(false)}
-            className="fixed inset-0 z-10 cursor-default"
+            className="fixed inset-0 z-40 cursor-default"
           />
-          <div className="absolute right-0 z-20 mt-2 max-h-96 w-80 max-w-[calc(100vw-2rem)] overflow-y-auto rounded border border-rule bg-surface">
-            <div className="border-b border-rule px-space-md py-space-sm font-mono text-mono-sm text-muted">
-              {unseen} unseen · {alerts.length} recent
+          <div className="absolute right-0 z-50 mt-1 max-h-96 w-84 max-w-[calc(100vw-2rem)] overflow-y-auto rounded border border-rule bg-surface shadow-xl">
+            <div className="flex items-center justify-between border-b border-rule px-3 py-2 font-mono text-[11px]">
+              <span className="text-muted">
+                {unseen} unseen · {alerts.length} recent
+              </span>
+              {unseen > 0 && (
+                <button
+                  type="button"
+                  onClick={() => void markAllSeen()}
+                  className="font-mono text-[11px] text-ok transition-colors hover:underline"
+                >
+                  Mark all as read
+                </button>
+              )}
             </div>
             {alerts.length === 0 ? (
-              <div className="px-space-md py-space-md font-mono text-mono-sm text-muted">No alerts yet.</div>
+              <div className="px-3 py-4 text-center font-mono text-[11px] text-muted">No alerts recorded yet.</div>
             ) : (
               alerts.map((a) => {
                 const d = describe(a);
                 return (
                   <div
                     key={a.id}
-                    className={'border-b border-rule px-space-md py-space-sm last:border-b-0 ' + (a.seen ? 'opacity-60' : '')}
+                    className={'border-b border-rule px-3 py-2 last:border-b-0 ' + (a.seen ? 'opacity-60' : 'bg-bg/40')}
                   >
-                    <div className="flex items-start justify-between gap-space-sm">
-                      <div className="min-w-0">
+                    <div className="flex items-start justify-between gap-2">
+                      <div className="min-w-0 flex-1">
                         <Link
                           to={`/product/${a.product_id}`}
                           onClick={() => setOpen(false)}
-                          className="block truncate text-body-sm font-medium text-ink hover:underline"
+                          className="block truncate font-sans text-[12px] font-medium text-ink hover:underline"
                         >
                           {a.product_name}
                         </Link>
-                        <div className="font-mono text-mono-sm">
+                        <div className="font-mono text-[11px]">
                           <span className={d.labelClass}>{d.label}</span>
                           <span className="text-muted">
                             : {d.from} → {d.to}
                           </span>
                         </div>
-                        <div className="font-mono text-mono-sm text-muted">{formatRelative(a.created_at)}</div>
+                        <div className="font-mono text-[10px] text-muted">{formatRelative(a.created_at)}</div>
                       </div>
                       {!a.seen && (
                         <button
                           type="button"
                           onClick={() => void markSeen(a.id)}
-                          className="shrink-0 font-mono text-mono-sm text-muted transition-colors hover:text-ink"
+                          className="shrink-0 font-mono text-[10px] text-muted transition-colors hover:text-ink"
                         >
-                          Mark seen
+                          Mark read
                         </button>
                       )}
                     </div>

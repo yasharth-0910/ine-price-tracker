@@ -33,3 +33,12 @@ alerts.post(
     res.status(204).end();
   }),
 );
+
+// POST /api/alerts/seen-all — mark all alerts seen.
+alerts.post(
+  '/api/alerts/seen-all',
+  asyncHandler(async (_req, res) => {
+    await sql`update alerts set seen = true where seen = false`;
+    res.status(204).end();
+  }),
+);

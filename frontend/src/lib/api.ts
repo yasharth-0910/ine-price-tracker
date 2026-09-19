@@ -239,4 +239,6 @@ export const api = {
     ),
 
   markAlertSeen: (id: string) => request<void>(`/api/alerts/${id}/seen`, { method: 'POST' }),
+
+  markAllAlertsSeen: () => request<void>('/api/alerts/seen-all', { method: 'POST' }),
 };
