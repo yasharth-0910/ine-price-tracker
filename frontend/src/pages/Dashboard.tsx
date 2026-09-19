@@ -253,8 +253,21 @@ export function Dashboard() {
 
   if (loading) {
     return (
-      <div className="flex h-64 items-center justify-center font-mono text-[12px] text-muted">
-        <span className="animate-pulse">Loading telemetry workbench…</span>
+      <div className="flex h-72 flex-col items-center justify-center gap-3 rounded border border-rule bg-surface p-6 font-mono text-[12px] text-muted">
+        <div className="flex items-center gap-2 text-ink">
+          <span className="inline-block h-2 w-2 animate-ping rounded-full bg-ok" />
+          <span>Loading telemetry workbench…</span>
+        </div>
+        <p className="max-w-md text-center text-[11px] text-muted">
+          If the backend was idle, Render is waking up from free-tier sleep (~30s).
+        </p>
+        <button
+          type="button"
+          onClick={() => void loadDashboard()}
+          className="mt-2 rounded border border-rule bg-bg px-3 py-1 text-[11px] text-ink hover:bg-surface-hover"
+        >
+          Force Refresh
+        </button>
       </div>
     );
   }

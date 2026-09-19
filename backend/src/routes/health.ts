@@ -11,7 +11,11 @@ health.get('/health', async (_req, res) => {
   let ok = false;
   let db_latency_ms: number | null = null;
   try {
-    await sql`select 1`;
+    // 3-second timeout so health check never hangs if connection is cold
+    await Promise.race([
+      sql`select 1`,
+      new Promise((_, reject) => setTimeout(() => reject(new Error('db ping timeout')), 3000)),
+    ]);
     ok = true;
     db_latency_ms = Math.round(performance.now() - start);
   } catch (err) {
