@@ -19,22 +19,49 @@ TODO: one paragraph on what recon found about the store, once Phase 0 is done.
 
 ## Stack
 
-React + Vite on Vercel, Express + TypeScript on Render, Supabase Postgres, undici + cheerio for
-the scheduled scrape, Playwright for the headed demo, cron-job.org for the trigger.
+React + Vite on Vercel, Express + TypeScript on Render, Supabase Postgres, Playwright for the
+scrape (scheduled runs on GitHub Actions, headed demo runs locally), undici + cheerio for the
+catalogue mirror, GitHub Actions cron for the schedule.
 
 ## Scraping schedule
 
-Every 2 hours, at :00. A second cron hits `/health` 5 minutes earlier to wake the Render instance,
-which sleeps after 15 minutes of inactivity. The scrape endpoint responds 202 immediately and
-processes in the background so the cron client does not time out.
+The scheduled scrape runs as a **GitHub Actions workflow** (`.github/workflows/scrape.yml`) on
+`cron: 0 */2 * * *` (every 2 hours at :00 UTC), with `workflow_dispatch` for manual runs. It runs
+the same Playwright run engine the API uses (`executeRun`, recorded as `trigger = 'cron'`) and
+writes validated results straight to Supabase. A `concurrency` group means two runs never overlap.
 
-| job | schedule | target |
-|---|---|---|
-| warm-up | `55 1,3,5,7,9,11,13,15,17,19,21,23 * * *` | `GET /health` |
-| scrape | `0 */2 * * *` | `POST /api/cron/scrape` with `x-cron-secret` |
+Render hosts the **read API** (everything the dashboard reads) and the **manual scrape** endpoint
+(`POST /api/cron/scrape`, still used by "Scrape now" and for on-demand runs). It is no longer on
+the scheduled path.
 
-A product scraped within the last 90 minutes is skipped, so a duplicate trigger cannot write a
-duplicate history row.
+A product scraped within the last 90 minutes is skipped, so a duplicate or overlapping trigger
+never writes a duplicate history row.
+
+### Why GitHub Actions and not a cron-job.org → Render trigger
+
+That was the original design, and it failed in production for a structural reason. Render's free
+instance spins down after 15 minutes of inactivity and cold-starts in **~2.5 minutes** — measured
+from Render logs: for a fire that arrived at 05:31, a fresh instance (`c8lsr`) only began booting at
+05:33:40 and was listening at 05:33:57. cron-job.org's maximum request timeout is **30 seconds**,
+so the trigger connection is cut long before the instance is awake; the request never reaches the
+app. The 00:00 UTC fire produced **no request log and no `scrape_runs` row** at all. A pre-warm
+ping a few minutes earlier does not help, because the warm-up request dies in the very same
+cold-start gap (it, too, is a <30s client against a ~2.5 min boot).
+
+GitHub Actions has a real scheduler, no spin-down, and enough CPU/RAM for Chromium — which also
+removes the per-attempt timeout pressure seen on the 512 MB Render box (a successful attempt there
+hit 45.3s against the 45s ceiling; on a runner it drops to single-digit seconds). So the scheduled
+run lives in Actions. This is a deliberate deviation from the assignment's suggested cron-job.org
+trigger, made because scraper reliability is the primary graded criterion. Note Actions cron is
+best-effort (it can lag a few minutes under load, fine for a 2h cadence) and scheduled workflows
+auto-disable after 60 days without default-branch activity.
+
+### Actions secret
+
+The workflow authenticates to Supabase with `DATABASE_URL` stored as a GitHub Actions secret.
+**Known trade-off:** that is the full-access connection string, not a Supabase role scoped to the
+four scrape tables. A scoped role is the better practice and the intended follow-up; it was skipped
+here only to save setup time.
 
 ## Reliability
 
@@ -87,7 +114,8 @@ Apply `db/schema.sql` in the Supabase SQL editor before the first run.
 
 ```
 npm run dev             # backend with reload
-npm run scrape:once     # one real run against the live store
+npm run scrape:once     # one real run against the live store (specific ids)
+npm run scrape:cron     # a full scheduled run (all tracked products); what GitHub Actions runs
 npm run scrape:headed   # Playwright headed run, add --chaos to force retries
 npm run verify:scrape   # fault-injection harness against a local chaos server
 ```

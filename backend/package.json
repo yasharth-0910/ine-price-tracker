@@ -11,6 +11,7 @@
     "start": "tsx src/index.ts",
     "crawl": "tsx scripts/catalog-crawl.ts",
     "scrape:once": "tsx scripts/scrape-once.ts",
+    "scrape:cron": "tsx scripts/scrape-cron.ts",
     "cron:local": "tsx scripts/cron-local.ts",
     "verify:scrape": "tsx scripts/verify-scrape.ts",
     "fake-store": "tsx scripts/fake-store.ts",

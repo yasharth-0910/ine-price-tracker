@@ -1,0 +1,40 @@
+name: scheduled-scrape
+
+# The scheduled price scrape lives here, not on Render. Render's free instance spins down after
+# 15 min idle and cold-starts in ~2.5 min — past cron-job.org's 30s cap — so an HTTP-triggered
+# scrape (even with a pre-warm) dies in the cold-start gap. Actions has a real scheduler, no
+# spin-down, and enough CPU/RAM for Chromium, and writes straight to Supabase. See README.
+
+on:
+  schedule:
+    - cron: '0 */2 * * *' # every 2 hours at :00 UTC (best-effort; Actions cron can lag under load)
+  workflow_dispatch: {} # manual trigger from the Actions tab
+
+# Never let two scrape runs overlap; a new fire queues until the current one finishes.
+concurrency:
+  group: scheduled-scrape
+  cancel-in-progress: false
+
+jobs:
+  scrape:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20 # a run is ~2-3 min; this only guards a hung run from burning minutes
+    defaults:
+      run:
+        working-directory: backend
+    env:
+      DATABASE_URL: ${{ secrets.DATABASE_URL }}
+      STORE_BASE_URL: https://demo.inelabteamdev.com
+      LOG_LEVEL: info
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+          cache-dependency-path: backend/package-lock.json
+      - run: npm ci
+      - run: npx playwright install --with-deps chromium
+      # Exits 0 even if some products failed (that's honest data in scrape_logs); non-zero only if
+      # the run engine itself throws — so the job goes red only for real breakage.
+      - run: npm run scrape:cron

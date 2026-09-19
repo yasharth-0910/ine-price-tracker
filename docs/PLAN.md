@@ -111,12 +111,18 @@ Cases (faults injected via `page.route()` on the price request unless noted):
       logged as `skipped_recent`, 4-min self-ping of `SELF_URL/health`, `finished_at` always recorded
 - [x] Manual single scrape (`POST /api/products/:id/scrape?force=1`), `GET /api/runs`, `npm run cron:local`
 - [ ] Deploy, set env vars on Render (`CRON_SECRET`, `SELF_URL`, `DATABASE_URL`, `STORE_BASE_URL`)
-- [ ] cron-job.org: warm-up job and scrape job, both configured
+- [~] ~~cron-job.org: warm-up job and scrape job~~ SUPERSEDED. cron-job.org → Render was proven
+      unreliable (Render free cold-start ~2.5 min ≫ cron-job.org's 30s cap; the fire never reached
+      the app, no `scrape_runs` row; pre-warm dies in the same gap — see NOTES). The scheduled scrape
+      now runs in **GitHub Actions** (`.github/workflows/scrape.yml`, `0 */2 * * *` + manual dispatch)
+      via `npm run scrape:cron` (inserts a `trigger='cron'` run, calls `executeRun`, writes straight
+      to Supabase). Render keeps the read API and `POST /api/cron/scrape` as the manual trigger.
+      REMAINING (user runs): add the `DATABASE_URL` GitHub Actions secret, then trigger the workflow.
 
-**Exit:** two consecutive real cron runs land in Supabase, verified by querying the tables.
+**Exit:** two consecutive real scheduled runs land in Supabase, verified by querying the tables.
 Verified locally against `ine_local` + the live store: track -> manual/cron run -> real `price_history`
-and `scrape_logs` rows, idempotent second call skips. The live-Supabase run is yours (live-DB rule).
-**Do not start Phase 6 until this is live.** History only accumulates in real time.
+and `scrape_logs` rows, idempotent second call skips. The live-Supabase scheduled run is yours (Actions
+holds the `DATABASE_URL` secret; live-DB rule).
 
 ## Phase 6 — Frontend
 

@@ -244,3 +244,36 @@ prod bundle for either a set or unset `VITE_API_URL`.
 **Gotcha for the grep check:** `grep localhost dist/` is NOT clean-or-broken. react-router bundles two
 internal `http://localhost` strings (a base for `new URL()` parsing and history), which are never a
 network target. The real check is `grep 'localhost:4000'` (our own dev base), not bare `localhost`.
+
+## [phase 5/7] Recommended pre-warming to fix the cron reliability hole; it structurally can't work
+**What it did:** faced with `POST /api/cron/scrape` silently failing on Render free, the first
+proposal was a cron-job.org warm-up hit to `/health` a few minutes before the scrape, to wake the
+instance so the scrape fire lands on a warm box. (A warm-up job had, in fact, already been deployed.)
+**Why it was wrong:** the warm-up request is subject to the exact failure it is meant to prevent.
+Render free cold-starts in ~2.5 min; cron-job.org caps a request at 30s. The warm-up connection is
+cut ~2 min before the instance is up, so it never completes and doesn't reliably drive the boot. The
+symptom (cron-job.org: "Failed — output too large") was the tell I under-weighted: an 80-byte
+`/health` can't be "too large", so the body it received was Render's cold-start holding page — i.e.
+the instance was cold at both the warm-up and the scrape.
+**How it was caught:** not by me — by reading the Render logs. Instance IDs change per boot: the
+successful 03:33 run was instance `tcn6l`; a fresh instance `c8lsr` only began booting at 05:33:40
+and was listening at 05:33:57 for a fire that arrived at 05:31, and the scrape produced no request
+log at all. That is a ~2.5 min cold start against a 30s cap — the request never reached the app.
+**Fix:** move the scheduled scrape off Render's HTTP path entirely. A GitHub Actions workflow
+(`.github/workflows/scrape.yml`) runs the same `executeRun` engine via `npm run scrape:cron` and
+writes straight to Supabase — no spin-down, no 30s client cap, and a runner fast enough to erase the
+per-attempt timeout pressure. Render keeps only the read API and the manual `POST /api/cron/scrape`.
+
+## [phase 5] slowest_attempt_ms hit 45302 on a *successful* Render run — the 45s ceiling had zero headroom
+**What it did:** the per-attempt timeout was tuned to 45s on Render. A successful run then recorded a
+slowest attempt of 45,302 ms — at (in fact just past) the ceiling.
+**Why it matters:** a success landing exactly on the timeout means the next slightly-slower page gets
+aborted as a false `timeout` and can burn the retry budget into a `failed` run with no history row —
+an intermittent reliability bug, caused by Chromium + the WASM proof-of-work on a 0.1-CPU / 512 MB box.
+**How it was caught:** the value is surfaced in every run summary (`slowest_attempt_ms`); the operator
+flagged it sitting on the ceiling.
+**Fix/So what:** don't bump the timeout blind — the move to GitHub Actions runners (the class where
+attempts measured ~2.5s locally, ~5× faster than Render) restores large headroom. Re-measure
+`slowest_attempt_ms` on the runner before retuning. Separately, 45,302 > 45,000 hints `duration_ms`
+measures a wall-time window the AbortController doesn't fully bound (nav/gate/extraction outside the
+timed fetch) — worth confirming the timeout guards the whole attempt, not just one sub-step.
