@@ -38,7 +38,6 @@ function config() {
     backoff: (process.env.SCRAPE_BACKOFF_MS || '1000,3000,9000').split(',').map(Number),
     jitterMs: Number(process.env.SCRAPE_JITTER_MS ?? 400),
     budgetMs: Number(process.env.SCRAPE_BUDGET_MS) || 45_000,
-    idempotencyMins: Number(process.env.SCRAPE_IDEMPOTENCY_MINS) || 90,
   };
 }
 
@@ -60,11 +59,15 @@ export async function scrapeProduct(
   const fetcherName = fetcher.name ?? 'browser';
 
   // Idempotency: a product scraped successfully inside the window is skipped, logged, not re-fetched.
-  // `force` (a manual/forced trigger) bypasses the skip.
-  const [row] = await sql<{ last_success_at: Date | null; last_layout_revision: number | null }[]>`
-    select last_success_at, last_layout_revision from products where id = ${product.id}`;
+  // The window is PER-PRODUCT — 75% of its scrape_interval_mins — so a slightly-early scheduled fire
+  // still runs, while a rapid double-trigger inside the window is skipped (INV-6). SCRAPE_IDEMPOTENCY_MINS
+  // overrides it (used by the fault harness). `force` (a manual/forced trigger) bypasses the skip.
+  const [row] = await sql<
+    { last_success_at: Date | null; last_layout_revision: number | null; scrape_interval_mins: number }[]
+  >`select last_success_at, last_layout_revision, scrape_interval_mins from products where id = ${product.id}`;
   const lastSuccess = row?.last_success_at ? new Date(row.last_success_at).getTime() : 0;
-  if (!opts.force && lastSuccess && Date.now() - lastSuccess < cfg.idempotencyMins * 60_000) {
+  const windowMins = Number(process.env.SCRAPE_IDEMPOTENCY_MINS) || Math.round((row?.scrape_interval_mins ?? 120) * 0.75);
+  if (!opts.force && lastSuccess && Date.now() - lastSuccess < windowMins * 60_000) {
     await sql`insert into scrape_logs (product_id, run_id, attempt_no, status, fetcher, duration_ms, error_code)
               values (${product.id}, ${runId}, 1, 'skipped_recent', ${fetcherName}, 0, 'skipped_recent')`;
     return { status: 'skipped_recent', attempts: 0 };

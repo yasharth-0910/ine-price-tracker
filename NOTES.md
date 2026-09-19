@@ -277,3 +277,59 @@ attempts measured ~2.5s locally, ~5× faster than Render) restores large headroo
 `slowest_attempt_ms` on the runner before retuning. Separately, 45,302 > 45,000 hints `duration_ms`
 measures a wall-time window the AbortController doesn't fully bound (nav/gate/extraction outside the
 timed fetch) — worth confirming the timeout guards the whole attempt, not just one sub-step.
+
+## [phase 5/7] One shared browser for the whole run OOM-crashed on Render after ~3 products
+**What it did:** `executeRun` launched a single Chromium + context and scraped all products through
+it, closing once at the end. On Render's 512 MB free instance a force-scrape of 6 products came back
+3 succeeded / 3 failed — every product after the third failed.
+**Why it was wrong:** Chromium's per-page memory (280 KB JS bundle, React hydration, the WASM PoW,
+DOM) accumulates across pages in one browser process. Around product 4 it crossed 512 MB, Render's
+OOM killer terminated the browser ("Target closed"), and because the context was shared every
+remaining product failed at once — the tell-tale "N ok then all-fail" split.
+**How it was caught:** the operator force-triggered the run and read `GET /api/runs` (3/3 split),
+twice. (Scheduled runs already moved to GitHub Actions with 7 GB, so this only bit the Render manual
+path — but that path still needs to work for "Scrape now".)
+**Fix:** recycle the browser every `SCRAPE_BROWSER_RECYCLE_EVERY` products (default 2) — a fresh
+browser+context per batch, closed before the next. Peak RAM stays ~one batch (~250 MB), and a crash
+now costs at most one batch instead of the rest of the run. Env-tunable per host (2 on Render, much
+higher on a 7 GB runner). Harness still 12/12; the real memory validation is a Render force-scrape.
+
+## [phase 5] postgres.js prepared statements break on Supabase's transaction pooler (a prod bug)
+**What it did:** `db/client.ts` created the pool with postgres.js defaults, i.e. prepared statements
+ON, while `DATABASE_URL` points at Supabase's transaction pooler (port 6543).
+**Why it was wrong:** the transaction pooler hands each statement a possibly-different backend
+connection and does not keep prepared statements, so queries intermittently throw
+`prepared statement "…" does not exist`. This isn't cosmetic — the Render read API and the Actions
+scrape writes both go through this pool, so it's a latent production reliability bug.
+**How it was caught:** verify:scrape, accidentally pointed at the live pooler (see next note), failed
+one case with exactly that error while the same run passed 12/12 against local Postgres.
+**Fix:** `prepare: false` on the pool — Supabase's documented setting for postgres.js + transaction
+pooler; harmless on a direct/session connection. (Alternative would be the session pooler / direct
+connection on 5432, but `prepare:false` is the minimal, host-agnostic fix.)
+
+## [phase 5] Ran the write-heavy verify:scrape against LIVE Supabase instead of a local DB
+**What it did:** ran `npm run verify:scrape` without overriding `DATABASE_URL`, so it used `.env`'s
+value — the live Supabase pooler — to create and scrape its `verify:*` test products.
+**Why it was wrong:** CLAUDE.md is explicit: never run writes (including verify:scrape) against live
+Supabase; local DBs only. The harness normally tears its rows down (`delete from products where
+source_product_id like 'verify:%'`), but this run errored on the pooler mid-way, so the teardown may
+not have completed — leaving stray `verify:*` products (and their cascade) plus a `manual` run row.
+**How it was caught:** noticing the injected `.env` DATABASE_URL was the `:6543` pooler after the run.
+**Fix:** re-ran with `DATABASE_URL=postgres://localhost/ine_local` (12/12). Cleanup for the live DB
+is the operator's (live-DB rule): `delete from products where source_product_id like 'verify:%';`
+and remove any empty `manual` run rows from that window. Going forward, always pass the local URL
+explicitly to verify:scrape.
+
+## [phase 6] Two source_product_id formats in the data would let the same store item be double-tracked
+**What it did:** the track flow (`POST /api/products`) stores `source_product_id` as the bare store
+id (`"647"`), but the `scrape-once` seeding tool stored `"store:647"`. The search's "already tracked"
+check first compared only against `String(item.id)`.
+**Why it was wrong:** a product tracked as `"store:647"` (which is what the live dashboard data
+actually contains) would not match search result id `647`, so the button would read "Track" instead
+of "Tracking" — and clicking it would `POST` `647`, which is a *different* `source_product_id`, so
+the `on conflict` upsert wouldn't fire and a duplicate product row would be created for the same item.
+**How it was caught:** smoke-testing the new routes against `ine_local`, the one product's
+`source_product_id` came back `"store:647"` while search yields numeric ids.
+**Fix:** the search matches both formats (`String(id)` or `store:${id}`) so a prefixed product still
+shows "Tracking". The deeper cleanup — normalising `scrape-once` to the bare id and migrating
+existing `store:*` rows — is left as a follow-up; the UI guard prevents the duplicate in the meantime.

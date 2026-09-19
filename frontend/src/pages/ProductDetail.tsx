@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useState, type ReactNode } from 'react';
-import { Link, useParams } from 'react-router-dom';
+import { Link, useNavigate, useParams } from 'react-router-dom';
 import {
   api,
   type HistoryRange,
@@ -152,6 +152,8 @@ export function ProductDetail() {
     void load();
   }, [load]);
 
+  const navigate = useNavigate();
+
   const changeRange = async (r: HistoryRange) => {
     if (state.status !== 'ready') return;
     setRange(r);
@@ -175,6 +177,21 @@ export function ProductDetail() {
   const success = computeSuccess(logs);
   const attemptTotals = runAttemptTotals(logs);
   const currency = latest?.currency ?? 'INR';
+  const ready = state.data;
+
+  async function untrack() {
+    if (!window.confirm(`Untrack "${product.name}"? Scraping stops, but its price history is kept.`)) return;
+    try {
+      await api.untrackProduct(id);
+      navigate('/');
+    } catch (e) {
+      window.alert(e instanceof Error ? e.message : 'Could not untrack this product');
+    }
+  }
+
+  // Reflect a saved interval locally without a full refetch.
+  const applyInterval = (mins: number) =>
+    setState({ status: 'ready', data: { ...ready, product: { ...product, scrape_interval_mins: mins } } });
 
   const chartPoints: ChartPoint[] = chartHistory.map((h) => ({
     t: new Date(h.scraped_at).getTime(),
@@ -195,23 +212,37 @@ export function ProductDetail() {
         </Link>
       </div>
 
-      {/* Header: name, price, stock, currency */}
+      {/* Header: name, price, stock, currency + actions (interval, untrack) */}
       <div className="border-b border-rule bg-surface px-space-lg py-space-lg">
-        <a
-          href={product.url}
-          target="_blank"
-          rel="noreferrer"
-          className="font-mono text-mono-sm text-muted hover:underline"
-        >
-          {product.url.replace(/^https?:\/\//, '')}
-        </a>
-        <h1 className="mt-1 text-headline-lg font-semibold tracking-tight text-ink">{product.name}</h1>
-        <div className="mt-2 flex flex-wrap items-baseline gap-space-md">
-          <span className="font-mono text-[30px] font-medium tabular-nums text-ink">
-            {latest ? formatMoney(latest.price, currency) : '—.—'}
-          </span>
-          <StockPill stock={latest?.stock ?? null} />
-          <span className="font-mono text-mono-sm text-muted">Currency: {currency}</span>
+        <div className="flex flex-col justify-between gap-space-md lg:flex-row lg:items-start">
+          <div className="min-w-0">
+            <a
+              href={product.url}
+              target="_blank"
+              rel="noreferrer"
+              className="font-mono text-mono-sm text-muted hover:underline"
+            >
+              {product.url.replace(/^https?:\/\//, '')}
+            </a>
+            <h1 className="mt-1 text-headline-lg font-semibold tracking-tight text-ink">{product.name}</h1>
+            <div className="mt-2 flex flex-wrap items-baseline gap-space-md">
+              <span className="font-mono text-[30px] font-medium tabular-nums text-ink">
+                {latest ? formatMoney(latest.price, currency) : '—.—'}
+              </span>
+              <StockPill stock={latest?.stock ?? null} />
+              <span className="font-mono text-mono-sm text-muted">Currency: {currency}</span>
+            </div>
+          </div>
+          <div className="flex shrink-0 flex-wrap items-center gap-space-md">
+            <IntervalSelect product={product} onSaved={applyInterval} />
+            <button
+              type="button"
+              onClick={() => void untrack()}
+              className="rounded border border-rule bg-bg px-space-md py-1 font-mono text-mono-sm text-ink transition-colors hover:border-failed hover:text-failed"
+            >
+              Untrack
+            </button>
+          </div>
         </div>
       </div>
 
@@ -371,6 +402,51 @@ export function ProductDetail() {
         </div>
       )}
     </div>
+  );
+}
+
+const INTERVAL_OPTIONS: Array<[number, string]> = [
+  [30, '30 min'],
+  [60, '1 hour'],
+  [120, '2 hours'], // assignment default
+  [240, '4 hours'],
+  [360, '6 hours'],
+  [720, '12 hours'],
+  [1440, '24 hours'],
+];
+
+function IntervalSelect({ product, onSaved }: { product: Product; onSaved: (mins: number) => void }) {
+  const [saving, setSaving] = useState(false);
+  const [err, setErr] = useState<string | null>(null);
+  return (
+    <label className="flex items-center gap-space-sm font-mono text-mono-sm text-muted">
+      Scrape every
+      <select
+        value={product.scrape_interval_mins}
+        disabled={saving}
+        onChange={async (e) => {
+          const mins = Number(e.target.value);
+          setSaving(true);
+          setErr(null);
+          try {
+            const { product: updated } = await api.setInterval(product.id, mins);
+            onSaved(updated.scrape_interval_mins);
+          } catch (e2) {
+            setErr(e2 instanceof Error ? e2.message : 'Save failed');
+          } finally {
+            setSaving(false);
+          }
+        }}
+        className="rounded border border-rule bg-bg px-2 py-1 text-ink focus:border-ink focus:outline-none disabled:opacity-50"
+      >
+        {INTERVAL_OPTIONS.map(([v, label]) => (
+          <option key={v} value={v}>
+            {label}
+          </option>
+        ))}
+      </select>
+      {err && <span className="text-failed">{err}</span>}
+    </label>
   );
 }
 

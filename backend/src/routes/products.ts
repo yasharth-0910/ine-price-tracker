@@ -52,6 +52,27 @@ products.delete(
   }),
 );
 
+// PATCH /api/products/:id { scrape_interval_mins } — change how often the product is scraped.
+// The scrape core reads this value for its per-product idempotency window.
+products.patch(
+  '/api/products/:id',
+  asyncHandler(async (req, res) => {
+    const id = req.params.id!;
+    const mins = Number((req.body as { scrape_interval_mins?: unknown })?.scrape_interval_mins);
+    const ALLOWED = [30, 60, 120, 240, 360, 720, 1440];
+    if (!ALLOWED.includes(mins)) {
+      res.status(400).json({ error: `scrape_interval_mins must be one of ${ALLOWED.join(', ')}` });
+      return;
+    }
+    const [product] = await sql`update products set scrape_interval_mins = ${mins} where id = ${id} returning *`;
+    if (!product) {
+      res.status(404).json({ error: 'not found' });
+      return;
+    }
+    res.json({ product });
+  }),
+);
+
 // GET /api/products — tracked products with their latest snapshot and 24h change.
 products.get(
   '/api/products',

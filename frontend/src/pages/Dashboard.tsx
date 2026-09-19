@@ -2,6 +2,7 @@ import { useCallback, useEffect, useState } from 'react';
 import { api, type ProductListItem, type Run } from '../lib/api';
 import { ProductRow } from '../components/ProductRow';
 import { RunStrip } from '../components/RunStrip';
+import { SearchTrack } from '../components/SearchTrack';
 
 const INTERVAL_MS = 120 * 60 * 1000; // 2h schedule
 
@@ -46,6 +47,18 @@ export function Dashboard() {
   if (state.status === 'error') return <ErrorState message={state.message} onRetry={() => void load()} />;
 
   const nextRun = computeNextRun(state.runs);
+  const trackedStoreIds = new Set(state.products.map((p) => p.source_product_id));
+
+  async function untrack(p: ProductListItem) {
+    if (!window.confirm(`Untrack "${p.name}"? Scraping stops, but its price history is kept.`)) return;
+    try {
+      await api.untrackProduct(p.id);
+      void load();
+    } catch (e) {
+      window.alert(e instanceof Error ? e.message : 'Could not untrack this product');
+    }
+  }
+
   return (
     <>
       <RunStrip
@@ -54,6 +67,7 @@ export function Dashboard() {
         nextRun={nextRun}
         lastRunMs={lastRunDurationMs(state.runs)}
       />
+      <SearchTrack trackedStoreIds={trackedStoreIds} onTracked={() => void load()} />
       {state.products.length === 0 ? (
         <EmptyState />
       ) : (
@@ -67,7 +81,7 @@ export function Dashboard() {
           </div>
           <div className="divide-y divide-rule bg-surface">
             {state.products.map((p) => (
-              <ProductRow key={p.id} product={p} nextRun={nextRun} />
+              <ProductRow key={p.id} product={p} nextRun={nextRun} onUntrack={untrack} />
             ))}
           </div>
         </>

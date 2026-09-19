@@ -14,6 +14,13 @@ import { scrapeProduct, type ProductInput } from './core.js';
 
 const SELF_PING_MS = 4 * 60 * 1000; // keep Render awake mid-run
 
+// Scrape this many products per browser before recycling it. Chromium's per-page memory (JS
+// bundles, the WASM PoW, DOM) accumulates across pages in one process; on Render's 512 MB instance
+// a single shared browser OOM-crashes after ~3-4 products ("Target closed") and fails the rest of
+// the run. Recycling caps peak RAM and, if a browser dies mid-batch, only that batch is lost.
+// Tunable per host: the free box wants ~2; a GitHub Actions runner (7 GB) can set it much higher.
+const BROWSER_RECYCLE_EVERY = Number(process.env.SCRAPE_BROWSER_RECYCLE_EVERY) || 2;
+
 export interface RunResult {
   total: number;
   succeeded: number;
@@ -47,28 +54,37 @@ export async function executeRun(
 
   const counts = { succeeded: 0, failed: 0, skipped: 0 };
   const stopPing = startSelfPing();
-  const browser = await chromium.launch(browserLaunchOptions);
-  const context = await browser.newContext();
-  const fetcher = new BrowserFetcher(context);
 
   try {
-    for (const product of products) {
+    // One fresh browser per batch of BROWSER_RECYCLE_EVERY products, closed before the next batch,
+    // so peak RAM stays well under Render's 512 MB ceiling and a crashed browser costs one batch,
+    // not the whole run. Concurrency is still 1 (one product at a time within a batch).
+    for (let i = 0; i < products.length; i += BROWSER_RECYCLE_EVERY) {
+      const batch = products.slice(i, i + BROWSER_RECYCLE_EVERY);
+      const browser = await chromium.launch(browserLaunchOptions);
+      const context = await browser.newContext();
+      const fetcher = new BrowserFetcher(context);
       try {
-        const out = await scrapeProduct(product, runId, fetcher, { force });
-        if (out.status === 'success' || out.status === 'retried') counts.succeeded++;
-        else if (out.status === 'skipped_recent') counts.skipped++;
-        else counts.failed++;
-      } catch (err) {
-        // scrapeProduct handles its own failures; this only fires on something truly unexpected.
-        // Never let one product take down the rest of the run (INV-7).
-        counts.failed++;
-        logger.error({ err, productId: product.id }, 'product scrape threw');
+        for (const product of batch) {
+          try {
+            const out = await scrapeProduct(product, runId, fetcher, { force });
+            if (out.status === 'success' || out.status === 'retried') counts.succeeded++;
+            else if (out.status === 'skipped_recent') counts.skipped++;
+            else counts.failed++;
+          } catch (err) {
+            // scrapeProduct handles its own failures; this only fires on something truly unexpected.
+            // Never let one product take down the rest of the run (INV-7).
+            counts.failed++;
+            logger.error({ err, productId: product.id }, 'product scrape threw');
+          }
+        }
+      } finally {
+        await context.close().catch(() => {});
+        await browser.close().catch(() => {});
+        await fetcher.dispose().catch(() => {});
       }
     }
   } finally {
-    await context.close().catch(() => {});
-    await browser.close().catch(() => {});
-    await fetcher.dispose().catch(() => {});
     stopPing();
     // INV-8: the run is finalised even if every product failed.
     await sql`update scrape_runs set finished_at = now(),

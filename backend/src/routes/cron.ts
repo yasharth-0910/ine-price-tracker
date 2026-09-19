@@ -42,13 +42,46 @@ cron.post(
   }),
 );
 
-// GET /api/runs — recent runs with their counts.
+// GET /api/runs — recent runs with their counts and the run's slowest attempt (the headroom gauge).
+// slowest_attempt_ms isn't stored on scrape_runs; it's the max attempt duration across the run's logs.
 cron.get(
   '/api/runs',
   asyncHandler(async (_req, res) => {
     const runs = await sql`
-      select id, trigger, started_at, finished_at, products_total, succeeded, failed, skipped, notes
-      from scrape_runs order by started_at desc limit 20`;
+      select r.id, r.trigger, r.started_at, r.finished_at, r.products_total, r.succeeded, r.failed, r.skipped, r.notes,
+             slow.max as slowest_attempt_ms
+      from scrape_runs r
+      left join lateral (select max(duration_ms) as max from scrape_logs where run_id = r.id) slow on true
+      order by r.started_at desc limit 20`;
     res.json({ count: runs.length, runs });
+  }),
+);
+
+// GET /api/runs/:id — a run plus its per-product outcome (the terminal attempt per product).
+cron.get(
+  '/api/runs/:id',
+  asyncHandler(async (req, res) => {
+    const id = req.params.id!;
+    const [run] = await sql`
+      select r.id, r.trigger, r.started_at, r.finished_at, r.products_total, r.succeeded, r.failed, r.skipped, r.notes,
+             slow.max as slowest_attempt_ms
+      from scrape_runs r
+      left join lateral (select max(duration_ms) as max from scrape_logs where run_id = r.id) slow on true
+      where r.id = ${id}`;
+    if (!run) {
+      res.status(404).json({ error: 'not found' });
+      return;
+    }
+    const products = await sql`
+      select p.id as product_id, p.name, p.source_product_id,
+             last.status, last.error_code, last.http_status, last.attempt_no as attempts, last.duration_ms
+      from products p
+      join lateral (
+        select status, error_code, http_status, attempt_no, duration_ms
+        from scrape_logs where run_id = ${id} and product_id = p.id
+        order by attempt_no desc, created_at desc limit 1
+      ) last on true
+      order by p.name`;
+    res.json({ run, products });
   }),
 );

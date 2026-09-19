@@ -141,8 +141,18 @@ holds the `DATABASE_URL` secret; live-DB rule).
       loading/error/empty states. Dashboard data gaps closed in the backend (GET /api/products now
       carries currency, history_count, last error, and the 24h sparkline) — N+1 removed. Vercel SPA
       rewrite added for deep links.
-- [ ] Add-product search flow
-- [ ] Loading, empty and error states. An error must look like an error, not an empty chart
+- [x] Add-product search flow: debounced `SearchTrack` on the dashboard over GET /api/store/search
+      (local catalogue mirror, noted in a comment), results show name/brand/category/SKU + Track;
+      already-tracked shows disabled "Tracking" (matches both `647` and `store:647` id formats to
+      avoid a duplicate track). Track = POST (no full reload); untrack from row + detail with a
+      confirm that says history is kept = DELETE. Per-product `scrape_interval_mins` select on detail
+      (PATCH /api/products/:id added; CORS now allows PATCH); the idempotency window reads the
+      per-product value (0.75×interval) instead of a hardcoded 90 min. Nav (Dashboard/Runs/theme) on
+      every page; `/runs` page (started, duration, trigger, ok/failed/skipped, slowest_attempt_ms,
+      expandable per-product breakdown via new GET /api/runs/:id; GET /api/runs now returns
+      slowest_attempt_ms). Build + `verify:scrape` 12/12 (ine_local).
+- [x] Loading, empty and error states. An error must look like an error, not an empty chart
+      (reviewed across dashboard/detail/search/runs; all four have the three states)
 - [~] Deploy to Vercel, set CORS on the backend. CODE DONE: strict-allowlist CORS from
       `CORS_ORIGINS` (hand-rolled `lib/cors.ts`, rejects+logs unlisted origins, 204 preflight,
       GET/POST/DELETE + Content-Type), `.env.example` updated. Frontend deploy-prep done: SPA rewrite

@@ -45,7 +45,15 @@ function Sparkline({ points, colorClass }: { points: number[]; colorClass: strin
   );
 }
 
-export function ProductRow({ product, nextRun }: { product: ProductListItem; nextRun: Date | null }) {
+export function ProductRow({
+  product,
+  nextRun,
+  onUntrack,
+}: {
+  product: ProductListItem;
+  nextRun: Date | null;
+  onUntrack: (p: ProductListItem) => void;
+}) {
   const failing = product.consecutive_failures > 0;
   const hasPrice = product.price != null && product.scraped_at != null;
   const currency = product.currency ?? 'INR';
@@ -115,6 +123,13 @@ export function ProductRow({ product, nextRun }: { product: ProductListItem; nex
                 Scraped {formatRelative(product.scraped_at!)} · {product.history_count}{' '}
                 {product.history_count === 1 ? 'record' : 'records'}
               </span>
+              <button
+                type="button"
+                onClick={() => onUntrack(product)}
+                className="mt-1 self-start font-mono text-mono-sm text-muted transition-colors hover:text-failed md:self-end"
+              >
+                Untrack
+              </button>
             </div>
           </>
         ) : (
@@ -130,6 +145,13 @@ export function ProductRow({ product, nextRun }: { product: ProductListItem; nex
               <span className="font-medium text-muted">
                 {failing ? 'Failing' : 'Pending first scrape'}
               </span>
+              <button
+                type="button"
+                onClick={() => onUntrack(product)}
+                className="mt-1 self-start font-mono text-mono-sm text-muted transition-colors hover:text-failed md:self-end"
+              >
+                Untrack
+              </button>
             </div>
           </>
         )}

@@ -126,6 +126,19 @@ export interface Run {
   failed: number;
   skipped: number;
   notes: string | null;
+  slowest_attempt_ms: number | null;
+}
+
+/** One product's terminal outcome within a run (GET /api/runs/:id). */
+export interface RunProduct {
+  product_id: string;
+  name: string;
+  source_product_id: string;
+  status: ScrapeStatus;
+  error_code: ScrapeErrorCode | null;
+  http_status: number | null;
+  attempts: number;
+  duration_ms: number;
 }
 
 /** Result of a manual/single scrape run. */
@@ -181,6 +194,12 @@ export const api = {
   untrackProduct: (id: string) =>
     request<void>(`/api/products/${id}`, { method: 'DELETE' }),
 
+  setInterval: (id: string, minutes: number) =>
+    request<{ product: Product }>(`/api/products/${id}`, {
+      method: 'PATCH',
+      body: JSON.stringify({ scrape_interval_mins: minutes }),
+    }),
+
   getProduct: (id: string) =>
     request<{ product: Product; latest: PriceSnapshot | null }>(`/api/products/${id}`),
 
@@ -198,4 +217,6 @@ export const api = {
     }),
 
   listRuns: () => request<{ count: number; runs: Run[] }>('/api/runs'),
+
+  getRun: (id: string) => request<{ run: Run; products: RunProduct[] }>(`/api/runs/${id}`),
 };

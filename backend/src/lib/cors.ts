@@ -27,7 +27,7 @@ export function cors(req: Request, res: Response, next: NextFunction): void {
 
   res.header('Access-Control-Allow-Origin', origin);
   res.header('Vary', 'Origin');
-  res.header('Access-Control-Allow-Methods', 'GET, POST, DELETE, OPTIONS');
+  res.header('Access-Control-Allow-Methods', 'GET, POST, PATCH, DELETE, OPTIONS');
   res.header('Access-Control-Allow-Headers', 'Content-Type');
   res.header('Access-Control-Max-Age', '86400');
 
