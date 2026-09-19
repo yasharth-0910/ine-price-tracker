@@ -96,7 +96,8 @@ const fulfill404 = (r: Route) => r.fulfill({ status: 404, contentType: 'applicat
 
 // --- DB helpers. Test rows are namespaced `verify:*` and torn down at the end. ---
 const rand = () => Math.random().toString(36).slice(2, 8);
-const [{ id: runId }] = await sql<{ id: string }[]>`insert into scrape_runs (trigger) values ('manual') returning id`;
+const [runRow] = await sql<{ id: string }[]>`insert into scrape_runs (trigger) values ('manual') returning id`;
+const runId = runRow!.id;
 
 async function makeProduct(slug: string, query = ''): Promise<ProductInput> {
   const src = `verify:${slug}:${rand()}`;
@@ -105,7 +106,7 @@ async function makeProduct(slug: string, query = ''): Promise<ProductInput> {
     insert into products (source_product_id, name, url)
     values (${src}, ${src}, ${url})
     returning id, source_product_id, url`;
-  return row;
+  return row!;
 }
 
 async function rowsFor(productId: string) {

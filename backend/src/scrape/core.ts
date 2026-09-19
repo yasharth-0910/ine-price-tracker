@@ -145,8 +145,8 @@ async function persistSuccess(
   product: ProductInput, runId: string, layout: Layout, fetcher: string,
   attempt: number, httpStatus: number | null, duration: number, ext: Extracted,
 ): Promise<void> {
-  const [prev] = await sql<{ price: string }[]>`
-    select price from price_history where product_id = ${product.id} order by scraped_at desc limit 1`;
+  const [prev] = await sql<{ price: string; stock: string; layout_revision: number | null }[]>`
+    select price, stock, layout_revision from price_history where product_id = ${product.id} order by scraped_at desc limit 1`;
   const anomalous = isAnomalous(prev ? Number(prev.price) : null, ext.price);
 
   await sql.begin(async (tx) => {
@@ -163,6 +163,25 @@ async function persistSuccess(
       layout_alert = layout_alert or (last_layout_revision is not null and last_layout_revision <> ${layout.revision}),
       last_layout_revision = ${layout.revision}
       where id = ${product.id}`;
+
+    // In-app alerts: compare this validated reading against the previous one and record any change
+    // honestly with old/new values. Only fires when there's a prior reading to compare against.
+    if (prev) {
+      const dropPct = Number(process.env.ALERT_PRICE_DROP_PCT) || 5;
+      const prevPrice = Number(prev.price);
+      if (prevPrice > 0 && ((prevPrice - ext.price) / prevPrice) * 100 > dropPct) {
+        await tx`insert into alerts (product_id, kind, old_value, new_value)
+                 values (${product.id}, 'price_drop', ${prev.price}, ${String(ext.price)})`;
+      }
+      if (prev.stock === 'out_of_stock' && ext.stock !== 'out_of_stock') {
+        await tx`insert into alerts (product_id, kind, old_value, new_value)
+                 values (${product.id}, 'back_in_stock', ${prev.stock}, ${ext.stock})`;
+      }
+      if (prev.layout_revision != null && prev.layout_revision !== layout.revision) {
+        await tx`insert into alerts (product_id, kind, old_value, new_value)
+                 values (${product.id}, 'layout_change', ${String(prev.layout_revision)}, ${String(layout.revision)})`;
+      }
+    }
   });
 }
 

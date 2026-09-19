@@ -184,7 +184,12 @@ holds the `DATABASE_URL` secret; live-DB rule).
       JSON; and (b) that product search runs against a locally cached mirror of the store's own
       catalogue, because the store exposes no search endpoint
 - [ ] Design note from `NOTES.md`: reliability decisions, trade-offs, AI mistakes and fixes
-- [ ] Bonus if time is left, in this order: price-drop alerts, per-product interval, GitHub Actions CI
+- [x] Bonus: in-app alerts (price_drop / back_in_stock / layout_change) written by the scrape core
+      in the success tx with honest old/new values; GET /api/alerts (+unseen filter, unseen_count),
+      POST /api/alerts/:id/seen; header bell with unseen count + panel, price-drop links to detail.
+      Price-drop % is configurable via ALERT_PRICE_DROP_PCT (default 5).
+- [x] Bonus: per-product scrape interval (PATCH /api/products/:id; idempotency reads the per-product value).
+- [x] Bonus: GitHub Actions scheduled scrape (.github/workflows/scrape.yml).
 - [ ] Repo public, live links checked from a logged-out browser
 - [ ] Email with the exact subject line from the assignment, resume attached
 

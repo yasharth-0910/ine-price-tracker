@@ -1,5 +1,6 @@
 import { BrowserRouter, Link, NavLink, Route, Routes } from 'react-router-dom';
 import { ThemeToggle } from './components/ThemeToggle';
+import { AlertsBell } from './components/AlertsBell';
 import { Dashboard } from './pages/Dashboard';
 import { ProductDetail } from './pages/ProductDetail';
 import { Runs } from './pages/Runs';
@@ -36,7 +37,10 @@ export default function App() {
               <NavItem to="/runs" label="Runs" />
             </nav>
           </div>
-          <ThemeToggle />
+          <div className="flex items-center gap-space-md">
+            <AlertsBell />
+            <ThemeToggle />
+          </div>
         </header>
         <main>
           <Routes>

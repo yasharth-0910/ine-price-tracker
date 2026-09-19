@@ -10,8 +10,9 @@ import {
   type ScrapeStatus,
   type StockStatus,
 } from '../lib/api';
-import { PriceChart, type ChartPoint } from '../components/PriceChart';
+import { PriceChart, type ChartPoint, type ChartFailure } from '../components/PriceChart';
 import { formatDuration, formatMoney, formatTimestamp } from '../lib/format';
+import { useManualScrape } from '../hooks/useManualScrape';
 
 const INTERVAL_MS = 120 * 60 * 1000;
 const DAY = 24 * 60 * 60 * 1000;
@@ -153,6 +154,7 @@ export function ProductDetail() {
   }, [load]);
 
   const navigate = useNavigate();
+  const { pending: scraping, error: scrapeError, scrape } = useManualScrape(load);
 
   const changeRange = async (r: HistoryRange) => {
     if (state.status !== 'ready') return;
@@ -197,11 +199,17 @@ export function ProductDetail() {
     t: new Date(h.scraped_at).getTime(),
     price: Number(h.price),
     stock: h.stock,
+    source: h.extraction_source,
   }));
   const domain = rangeDomain(range, chartPoints);
-  const failures = logs
+  const failures: ChartFailure[] = logs
     .filter((l) => l.status === 'failed')
-    .map((l) => new Date(l.created_at).getTime());
+    .map((l) => ({
+      t: new Date(l.created_at).getTime(),
+      error_code: l.error_code,
+      error_message: l.error_message,
+      http_status: l.http_status,
+    }));
 
   return (
     <div className="flex flex-col">
@@ -233,15 +241,28 @@ export function ProductDetail() {
               <span className="font-mono text-mono-sm text-muted">Currency: {currency}</span>
             </div>
           </div>
-          <div className="flex shrink-0 flex-wrap items-center gap-space-md">
-            <IntervalSelect product={product} onSaved={applyInterval} />
-            <button
-              type="button"
-              onClick={() => void untrack()}
-              className="rounded border border-rule bg-bg px-space-md py-1 font-mono text-mono-sm text-ink transition-colors hover:border-failed hover:text-failed"
-            >
-              Untrack
-            </button>
+          <div className="flex shrink-0 flex-col items-end gap-space-sm">
+            <div className="flex flex-wrap items-center gap-space-md">
+              <IntervalSelect product={product} onSaved={applyInterval} />
+              <button
+                type="button"
+                disabled={scraping}
+                onClick={() => void scrape(id)}
+                className="rounded border border-rule bg-bg px-space-md py-1 font-mono text-mono-sm text-ink transition-colors hover:bg-surface-hover disabled:opacity-60"
+              >
+                {scraping ? 'Scraping…' : 'Scrape now'}
+              </button>
+              <button
+                type="button"
+                onClick={() => void untrack()}
+                className="rounded border border-rule bg-bg px-space-md py-1 font-mono text-mono-sm text-ink transition-colors hover:border-failed hover:text-failed"
+              >
+                Untrack
+              </button>
+            </div>
+            {scrapeError && (
+              <span className="font-mono text-mono-sm text-failed">Scrape failed: {scrapeError}</span>
+            )}
           </div>
         </div>
       </div>

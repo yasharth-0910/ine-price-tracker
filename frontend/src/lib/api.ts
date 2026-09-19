@@ -14,6 +14,7 @@ const BASE = (
 export type StockStatus = 'in_stock' | 'low_stock' | 'out_of_stock';
 export type ScrapeStatus = 'success' | 'retried' | 'failed';
 export type RunTrigger = 'cron' | 'manual' | 'headed';
+export type AlertKind = 'price_drop' | 'back_in_stock' | 'layout_change';
 export type ScrapeErrorCode =
   | 'timeout' | 'http_5xx' | 'http_429' | 'http_404' | 'network'
   | 'parse_empty' | 'parse_invalid' | 'validation_failed';
@@ -129,6 +130,18 @@ export interface Run {
   slowest_attempt_ms: number | null;
 }
 
+/** An in-app alert (price drop / back in stock / layout change). old/new are stringly-typed. */
+export interface Alert {
+  id: string;
+  product_id: string;
+  product_name: string;
+  kind: AlertKind;
+  old_value: string | null;
+  new_value: string | null;
+  seen: boolean;
+  created_at: string;
+}
+
 /** One product's terminal outcome within a run (GET /api/runs/:id). */
 export interface RunProduct {
   product_id: string;
@@ -219,4 +232,11 @@ export const api = {
   listRuns: () => request<{ count: number; runs: Run[] }>('/api/runs'),
 
   getRun: (id: string) => request<{ run: Run; products: RunProduct[] }>(`/api/runs/${id}`),
+
+  listAlerts: (unseenOnly = false) =>
+    request<{ count: number; unseen_count: number; alerts: Alert[] }>(
+      `/api/alerts${unseenOnly ? '?unseen=1' : ''}`,
+    ),
+
+  markAlertSeen: (id: string) => request<void>(`/api/alerts/${id}/seen`, { method: 'POST' }),
 };

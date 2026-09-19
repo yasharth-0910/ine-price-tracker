@@ -333,3 +333,7 @@ the `on conflict` upsert wouldn't fire and a duplicate product row would be crea
 **Fix:** the search matches both formats (`String(id)` or `store:${id}`) so a prefixed product still
 shows "Tracking". The deeper cleanup — normalising `scrape-once` to the bare id and migrating
 existing `store:*` rows — is left as a follow-up; the UI guard prevents the duplicate in the meantime.
+**Resolved:** canonical format is now the bare store id. `scrape-once` writes `String(id)`,
+`db/migrations/003_normalise_source_product_id.sql` strips the `store:` prefix (collision-guarded,
+leaves ambiguous rows for manual merge), and the dual-match workaround was removed. Migration tested
+on `ine_local` including a rolled-back collision case; the operator runs it on Supabase.

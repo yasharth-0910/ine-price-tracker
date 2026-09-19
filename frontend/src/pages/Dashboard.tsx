@@ -81,7 +81,7 @@ export function Dashboard() {
           </div>
           <div className="divide-y divide-rule bg-surface">
             {state.products.map((p) => (
-              <ProductRow key={p.id} product={p} nextRun={nextRun} onUntrack={untrack} />
+              <ProductRow key={p.id} product={p} nextRun={nextRun} onUntrack={untrack} onRefresh={() => load()} />
             ))}
           </div>
         </>

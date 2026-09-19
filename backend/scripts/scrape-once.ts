@@ -20,7 +20,7 @@ async function ensureProduct(id: number): Promise<{ product: ProductInput; metaS
   const name = meta.status === 200 && meta.body?.name ? meta.body.name : `product-${id}`;
   const [product] = await sql<ProductInput[]>`
     insert into products (source_product_id, name, url)
-    values (${`store:${id}`}, ${name}, ${url})
+    values (${String(id)}, ${name}, ${url})
     on conflict (source_product_id) do update set name = excluded.name, url = excluded.url
     returning id, source_product_id, url`;
   return { product: product!, metaStatus: meta.status };

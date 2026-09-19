@@ -87,9 +87,8 @@ export function SearchTrack({
       {state.status === 'done' && state.items.length > 0 && (
         <ul className="mt-space-sm divide-y divide-rule rounded border border-rule">
           {state.items.map((item) => {
-            // Match both id formats present in the data: POST stores the bare id ("647"), while
-            // scrape-once seeding stored a "store:647" prefix. Matching both avoids a duplicate track.
-            const tracked = trackedStoreIds.has(String(item.id)) || trackedStoreIds.has(`store:${item.id}`);
+            // source_product_id is normalised to the bare store id (migration 003), so a direct match.
+            const tracked = trackedStoreIds.has(String(item.id));
             return (
               <li
                 key={item.id}

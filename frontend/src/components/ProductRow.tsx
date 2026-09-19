@@ -1,6 +1,7 @@
 import { Link } from 'react-router-dom';
 import type { ProductListItem, StockStatus } from '../lib/api';
 import { formatMoney, formatRelative, formatTimestamp } from '../lib/format';
+import { useManualScrape } from '../hooks/useManualScrape';
 
 // One tracked product as a full-width row (hairline-separated, not a card). Renders only real
 // values; a product with no successful scrape shows a "no data yet" note rather than an empty chart
@@ -49,11 +50,14 @@ export function ProductRow({
   product,
   nextRun,
   onUntrack,
+  onRefresh,
 }: {
   product: ProductListItem;
   nextRun: Date | null;
   onUntrack: (p: ProductListItem) => void;
+  onRefresh: () => void | Promise<void>;
 }) {
+  const { pending, error: scrapeError, scrape } = useManualScrape(onRefresh);
   const failing = product.consecutive_failures > 0;
   const hasPrice = product.price != null && product.scraped_at != null;
   const currency = product.currency ?? 'INR';
@@ -123,13 +127,6 @@ export function ProductRow({
                 Scraped {formatRelative(product.scraped_at!)} · {product.history_count}{' '}
                 {product.history_count === 1 ? 'record' : 'records'}
               </span>
-              <button
-                type="button"
-                onClick={() => onUntrack(product)}
-                className="mt-1 self-start font-mono text-mono-sm text-muted transition-colors hover:text-failed md:self-end"
-              >
-                Untrack
-              </button>
             </div>
           </>
         ) : (
@@ -145,16 +142,31 @@ export function ProductRow({
               <span className="font-medium text-muted">
                 {failing ? 'Failing' : 'Pending first scrape'}
               </span>
-              <button
-                type="button"
-                onClick={() => onUntrack(product)}
-                className="mt-1 self-start font-mono text-mono-sm text-muted transition-colors hover:text-failed md:self-end"
-              >
-                Untrack
-              </button>
             </div>
           </>
         )}
+      </div>
+
+      {/* Row actions */}
+      <div className="mt-2 flex items-center justify-end gap-space-md">
+        {scrapeError && (
+          <span className="font-mono text-mono-sm text-failed">Scrape failed: {scrapeError}</span>
+        )}
+        <button
+          type="button"
+          disabled={pending}
+          onClick={() => void scrape(product.id)}
+          className="font-mono text-mono-sm text-muted transition-colors hover:text-ink disabled:opacity-60"
+        >
+          {pending ? 'Scraping…' : 'Scrape now'}
+        </button>
+        <button
+          type="button"
+          onClick={() => onUntrack(product)}
+          className="font-mono text-mono-sm text-muted transition-colors hover:text-failed"
+        >
+          Untrack
+        </button>
       </div>
     </div>
   );

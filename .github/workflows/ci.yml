@@ -1,0 +1,123 @@
+name: ci
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+# Don't pile up runs on rapid pushes to the same ref.
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  # Fast lane: typecheck + build for both workspaces. No DB, no browser.
+  # (The backend runs under tsx, so it has no build artifact — typecheck is its compile gate.
+  #  The frontend `build` runs `tsc -b && vite build`, i.e. typecheck + build.)
+  checks:
+    runs-on: ubuntu-latest
+    timeout-minutes: 8
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      - name: Cache backend node_modules
+        id: be-modules
+        uses: actions/cache@v4
+        with:
+          path: backend/node_modules
+          key: ${{ runner.os }}-node20-backend-${{ hashFiles('backend/package-lock.json') }}
+      - name: Install backend deps
+        if: steps.be-modules.outputs.cache-hit != 'true'
+        working-directory: backend
+        run: npm ci
+
+      - name: Cache frontend node_modules
+        id: fe-modules
+        uses: actions/cache@v4
+        with:
+          path: frontend/node_modules
+          key: ${{ runner.os }}-node20-frontend-${{ hashFiles('frontend/package-lock.json') }}
+      - name: Install frontend deps
+        if: steps.fe-modules.outputs.cache-hit != 'true'
+        working-directory: frontend
+        run: npm ci
+
+      - name: Backend typecheck
+        working-directory: backend
+        run: npm run typecheck
+
+      - name: Frontend typecheck + build
+        working-directory: frontend
+        run: npm run build
+
+  # Slow lane: fault-injection harness against a real Postgres, driving headless Chromium.
+  # Runs in parallel with `checks` to keep total wall-clock down.
+  harness:
+    runs-on: ubuntu-latest
+    timeout-minutes: 12
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: ci
+          POSTGRES_PASSWORD: ci
+          POSTGRES_DB: ine_ci
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U ci"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+    env:
+      DATABASE_URL: postgres://ci:ci@localhost:5432/ine_ci
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      - name: Cache backend node_modules
+        id: be-modules
+        uses: actions/cache@v4
+        with:
+          path: backend/node_modules
+          key: ${{ runner.os }}-node20-backend-${{ hashFiles('backend/package-lock.json') }}
+      - name: Install backend deps
+        if: steps.be-modules.outputs.cache-hit != 'true'
+        working-directory: backend
+        run: npm ci
+
+      # Cache the Chromium binary (~150MB). System libs aren't cacheable, so install just those on a hit.
+      - name: Cache Playwright browsers
+        id: pw-cache
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/ms-playwright
+          key: ${{ runner.os }}-playwright-${{ hashFiles('backend/package-lock.json') }}
+      - name: Install Chromium + system deps
+        if: steps.pw-cache.outputs.cache-hit != 'true'
+        working-directory: backend
+        run: npx playwright install --with-deps chromium
+      - name: Install Chromium system deps (browser cached)
+        if: steps.pw-cache.outputs.cache-hit == 'true'
+        working-directory: backend
+        run: npx playwright install-deps chromium
+
+      - name: Apply schema + migrations
+        env:
+          PGPASSWORD: ci
+        run: |
+          psql -h localhost -U ci -d ine_ci -v ON_ERROR_STOP=1 -f db/schema.sql
+          for m in db/migrations/*.sql; do
+            echo "applying $m"
+            psql -h localhost -U ci -d ine_ci -v ON_ERROR_STOP=1 -f "$m"
+          done
+
+      - name: Fault-injection harness
+        working-directory: backend
+        run: npm run verify:scrape
