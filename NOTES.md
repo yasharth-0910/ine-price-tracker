@@ -130,4 +130,117 @@ text); surface it as status 404 so the core treats it as terminal — one attemp
 the invented ids from `fake-store.ts` and gave it a real not-found page so the fake stops agreeing
 with a fetcher that only worked against the fake. Re-verified: 1001 now fails as `http_404` in ~0.2s.
 
+## [phase 5] Resource blocking, proposed as a Render latency fix, changed nothing and was reverted
+**What it did:** the first live cron run on Render failed with all three attempts hitting the 10s
+per-attempt timeout before the price request ever fired (local is ~3s, Render free ~5x slower). The
+proposed fix was to intercept requests and abort image/font/media/stylesheet loads to lighten the
+page.
+**Why it was wrong:** measured against the live store, it bought nothing. `/product/{id}` loads 280KB
+of JS and 8KB of CSS and **zero** images, fonts or media — there is nothing to block. And blocking
+stylesheets broke the interaction gate outright: extraction is class-based, but the price block must
+be laid out to be hovered, so with no CSS the gate never satisfies and every attempt times out. The
+real constraint is CPU, not bytes: JS parse, React hydration, and the WASM proof-of-work solve, none
+of which is a blockable resource.
+**How it was caught:** an A/B of `scrape:once` with and without blocking (identical ~2.5s median),
+plus a network capture showing 0 image/font/media requests; blocking stylesheets timed out 3/3.
+**Fix:** reverted resource blocking entirely (including the `SCRAPE_BLOCK_RESOURCES` kill-switch) and
+raised the timeout budget instead (`SCRAPE_ATTEMPT_TIMEOUT_MS`, `SCRAPE_BUDGET_MS` via env). Kept the
+new `slowest_attempt_ms` in the run summary as the signal for whether that budget still has headroom.
+
 ---
+
+## [phase 6] The format helper's self-check would have white-screened the browser
+**What it did:** `lib/format.ts` ended with a Ponytail-style runnable self-check gated on
+`if (import.meta.url === ` + "`file://${process.argv[1]}`" + `)`, copied from the backend pattern.
+**Why it was wrong:** the interpolation evaluates `process.argv[1]` eagerly, and `process` is
+undefined in the browser bundle — a `ReferenceError` at module import, before React mounts, i.e. a
+blank page. The backend pattern doesn't transfer to a file Vite ships to the client.
+**How it was caught:** reasoning about the browser context while writing (not a test — there is no
+frontend test harness this phase); the `tsc` build would also have flagged `process` as untyped.
+**Fix:** guard on `(globalThis as {process?:{argv?:string[]}}).process?.argv?.[1]?.endsWith(...)`
+— optional-chained so it's inert and type-safe in the browser, still runnable via `tsx`.
+
+## [phase 6] Assumed a Tailwind v3 config + `darkMode:'class'` setup
+**What it did:** the phase brief says "wire tailwind.config.js ... with darkMode:'class'"; the first
+mental model was a v3 project with a PostCSS config and a JS-config-driven theme.
+**Why it was wrong:** the repo is Tailwind **v4** (`@tailwindcss/vite`, `@import "tailwindcss"`, no
+config file, no postcss.config). v4 is CSS-first: there is no `darkMode` key in CSS by default and a
+JS config isn't loaded unless you ask for it.
+**How it was caught:** reading `frontend/package.json` and `src/index.css` before writing anything.
+**Fix:** kept the requested `tailwind.config.js` (darkMode:'class', theme.extend mapped to var(--…))
+and loaded it from CSS with v4's `@config` directive, plus `@custom-variant dark` so the `dark:`
+variant keys off `.dark`. Verified the built CSS carries both the `:root` and `.dark` palettes and
+the var()-backed utilities (`.text-ink`, `.bg-surface`, …).
+
+## [phase 6] The dashboard mockup ships invented telemetry, and its row shape invites faking data
+**What it did:** the Stitch export renders a footer ("SQLite database size 1.84 MB", "Run duration
+412ms", "Single cron process", a fake `pid`), a live "in 01:24:18" countdown, per-row "48 records",
+and dollar prices — and its sparkline reads as a smooth curve. A faithful 1:1 port would have shipped
+all of it, but none of those values exist in this system or the API.
+**Why it was wrong:** the DB is Supabase Postgres, not SQLite; there is no long-lived process to have
+a PID (Render free sleeps); "records" per product isn't in `GET /api/products`; the store prices in
+INR, not USD; and drawing a sparkline from just `price` + `price_24h_ago` (the two fields the list
+endpoint has) is a straight line between two points that misrepresents intraday movement.
+**How it was caught:** the phase brief called it out explicitly ("no SQLite paths, no PIDs, no
+runtime status, only real values"), and cross-checking each mockup value against the route handlers
+in `backend/src/routes/products.ts` showed which fields simply don't exist.
+**Fix:** dropped the footer, countdown, and record counts entirely. The run strip's "last run
+duration" is the one real duration (`finished_at - started_at`). Sparklines fetch the real
+`?range=24h` series per row (and render nothing under 2 points rather than a fake flat line); the
+failing-row error line reads the real `error_code` from `GET /.../logs?limit=1`; currency comes from
+the history row's `currency` and falls back to the store's real INR. Left as follow-ups the store
+can't yet supply cheaply from one call: currency and a record count on the list endpoint.
+(Follow-up closed the next session: `GET /api/products` now carries currency, history_count, the last
+error, and the 24h sparkline, and the per-row fetches were removed.)
+
+## [phase 6] Built a Tailwind class name at runtime with `.replace`, which the JIT can't see
+**What it did:** the detail-page stock pill coloured its dot by transforming the text token into a
+background one inline — `STOCK[stock].className.replace('text-', 'bg-')` — to avoid repeating a map.
+**Why it was wrong:** Tailwind (v4 included) generates utilities by scanning source for *literal*
+class strings. A class assembled at runtime never appears in the source, so `bg-ok` / `bg-muted`
+would be absent from the build and the dot would render with no colour. Convenient, and invisible
+until you look at the actual DOM in the right theme.
+**How it was caught:** reasoning about the JIT scanner while writing (before the build); confirmed
+after by grepping the emitted CSS for `.bg-muted` once the map was made explicit.
+**Fix:** added an explicit `block: 'bg-…'` field to the stock map so every class is a literal in
+source. Same rule already shaped the delta/outcome colours as full literal strings, not templates.
+
+## [phase 6] The detail page needed extraction_source, but the history/latest routes didn't select it
+**What it did:** the price-history table's "source" column shows `extraction_source · rev N`, but
+`GET /api/products/:id/history` and the `:id` latest snapshot query selected `layout_revision` and
+`layout_variant` and omitted `extraction_source` (the column exists in `price_history`, the scraper
+writes it every run).
+**Why it was wrong:** the UI can only show what the API returns; the field was there in the DB but
+never travelled to the client, so the column would have been permanently blank.
+**How it was caught:** cross-checking the mockup's "Method" column against the two `select` lists in
+`backend/src/routes/products.ts`.
+**Fix:** added `extraction_source` to both selects and to the `PriceSnapshot` type.
+
+## [phase 6] Deviated from PLAN's "Recharts" to a hand-rolled SVG chart, on purpose
+**What it did:** PLAN phase 6 named Recharts for the detail chart. This session's brief instead asked
+for a thin line with no gradient, grey out-of-stock bands, a *broken* line with a small red tick on
+the x-axis at each failed scrape, and strictly no interpolation across missing data.
+**Why Recharts was the wrong tool here:** its `ReferenceLine` spans the full plot height (not a small
+axis tick), gaps require injecting null points and still fight `connectNulls`, and colouring by CSS
+`var()` tokens (the "no hex in components" rule) across line/area/reference layers is awkward. Getting
+it to match would have been *more* code than drawing the SVG directly.
+**How it was caught:** not a bug — a design call made while reading the brief against Recharts' API.
+**Fix:** hand-rolled `PriceChart.tsx` with full control of segments, bands, and ticks, all coloured
+with `var(--…)` tokens so it tracks the theme. Flagged so the choice is on record, not drift; it is
+trivially swappable if a Recharts version is preferred.
+
+## [phase 6] The API-base fallback would have shipped `localhost` to production
+**What it did:** `api.ts` set the base URL as `import.meta.env.VITE_API_URL ?? 'http://localhost:4000'`.
+With `VITE_API_URL` set at build time Vite inlines it, but the `?? 'http://localhost:4000'` literal
+still ends up in the production bundle as the right-hand side of the `??` — dead code, but a real
+`localhost` string shipped to prod, and if the env var were ever missing the app would silently call
+localhost.
+**Why it was wrong:** a deploy checklist that greps the bundle for `localhost` should come back clean;
+a hardcoded dev URL in a production artefact is exactly the smell that grep is meant to catch.
+**How it was caught:** the phase-4 requirement to grep the build for `localhost`.
+**Fix:** guarded the fallback with `import.meta.env.DEV` so Vite constant-folds it away in prod
+(`DEV` → `false` → the branch is eliminated). Verified: `localhost:4000` no longer appears in the
+prod bundle for either a set or unset `VITE_API_URL`.
+**Gotcha for the grep check:** `grep localhost dist/` is NOT clean-or-broken. react-router bundles two
+internal `http://localhost` strings (a base for `new URL()` parsing and history), which are never a
+network target. The real check is `grep 'localhost:4000'` (our own dev base), not bare `localhost`.

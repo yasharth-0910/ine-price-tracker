@@ -1,1 +1,46 @@
 @import "tailwindcss";
+@config "../tailwind.config.js";
+
+/* darkMode:'class' equivalent for Tailwind v4: the `dark:` variant keys off a .dark ancestor. */
+@custom-variant dark (&:where(.dark, .dark *));
+
+/*
+  Instrument Panel design tokens (from precision_cron_scrape_monitor/DESIGN.md).
+  Semantic names only. This is the ONLY file that carries hex — components reference the
+  tailwind utilities (bg-surface, text-ink, text-ok, …) that map to these vars.
+  :root is light; .dark overrides. tailwind.config.js maps each utility to var(--…).
+*/
+:root {
+  --bg: #F6F7F5;
+  --surface: #FFFFFF;
+  --surface-hover: #EEF0ED; /* derived: DESIGN.md gives no light hover wash */
+  --ink: #15181B;
+  --muted: #5E6A6B;
+  --rule: #DDE1DE;
+  --status-ok: #2F6B4F;
+  --status-retried: #9C6B1F;
+  --status-failed: #9E3A2E;
+  --accent: #1F7A52; /* derived: brand green readable on light; dark value is from the export */
+}
+
+.dark {
+  --bg: #0E1113;
+  --surface: #161B1E;
+  --surface-hover: #1B2226;
+  --ink: #E7EAE8;
+  --muted: #8A9495;
+  --rule: #252C30;
+  --status-ok: #4E9B76;
+  --status-retried: #C79242;
+  --status-failed: #C4594A;
+  --accent: #88D7AE;
+}
+
+@layer base {
+  body {
+    background: var(--bg);
+    color: var(--ink);
+    font-family: "IBM Plex Sans", ui-sans-serif, system-ui, sans-serif;
+    -webkit-font-smoothing: antialiased;
+  }
+}

@@ -24,4 +24,10 @@ export const env = {
   // The service's own public URL, used to self-ping /health during a run so Render doesn't sleep
   // mid-run. Unset => no self-ping (fine for local dev).
   SELF_URL: process.env.SELF_URL || '',
+  // Comma-separated browser origins allowed to call the API (CORS). Unset => every browser origin
+  // is rejected (and logged), which is the loud failure we want for a misconfigured deploy.
+  CORS_ORIGINS: (process.env.CORS_ORIGINS || '')
+    .split(',')
+    .map((s) => s.trim())
+    .filter(Boolean),
 };

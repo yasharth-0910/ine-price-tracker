@@ -120,12 +120,33 @@ and `scrape_logs` rows, idempotent second call skips. The live-Supabase run is y
 
 ## Phase 6 — Frontend
 
-- [ ] Vite + React + Tailwind, API client, env for the backend URL
-- [ ] Dashboard from the Stitch reference
-- [ ] Product detail: Recharts line chart, history table, log table with status pills
+- [x] Vite + React + Tailwind (v4), design tokens on :root/.dark, theme toggle, typed API client,
+      UTC->local time formatter. `VITE_API_URL` (renamed from `VITE_API_BASE_URL`). Build green.
+- [x] Dashboard from the Stitch reference: RunStrip (36×2h windows from GET /api/runs, hollow =
+      no run), ProductRow (hairline rows, real 24h sparkline, ok/failed delta, failure left-bar +
+      last error code from logs, layout_alert badge), loading/error/empty states. Invented mockup
+      telemetry (db size, PID, scheduler status) dropped. Search/track bar is the next bullet.
+- [x] Product detail (/product/:id, react-router): back link, name, large price, stock, four
+      hairline stat blocks (24h change, 7d low/high, success rate), price chart, two tables.
+      Chart is hand-rolled SVG (not Recharts — see NOTES): thin line, no gradient, grey out-of-stock
+      bands, hard break + red x-axis tick on failed scrapes, no interpolation across gaps, 24h/7d/All
+      toggle. Price table has a source column (extraction_source · rev). Log table outcome is a square
+      colour block + word; detail shows real error_code + http_status, never a bare "failed".
+      loading/error/empty states. Dashboard data gaps closed in the backend (GET /api/products now
+      carries currency, history_count, last error, and the 24h sparkline) — N+1 removed. Vercel SPA
+      rewrite added for deep links.
 - [ ] Add-product search flow
 - [ ] Loading, empty and error states. An error must look like an error, not an empty chart
-- [ ] Deploy to Vercel, set CORS on the backend
+- [~] Deploy to Vercel, set CORS on the backend. CODE DONE: strict-allowlist CORS from
+      `CORS_ORIGINS` (hand-rolled `lib/cors.ts`, rejects+logs unlisted origins, 204 preflight,
+      GET/POST/DELETE + Content-Type), `.env.example` updated. Frontend deploy-prep done: SPA rewrite
+      confirmed, `VITE_API_URL` is the only env var, localhost fallback DEV-guarded (verified absent
+      from the prod bundle; the two remaining `http://localhost` strings are react-router internals).
+      LIVE: frontend https://ine-assignment.yasharth.xyz (alias https://ine-assignment-flame.vercel.app),
+      backend https://ine-price-tracker.onrender.com. `VITE_API_URL` set + baked on Vercel.
+      REMAINING (user runs): redeploy the backend to Render with this session's CORS code, then set
+      `CORS_ORIGINS=https://ine-assignment.yasharth.xyz,https://ine-assignment-flame.vercel.app` on
+      Render. (Until the CORS code is deployed, the browser gets no ACAO header → "Failed to fetch".)
 
 **Exit:** the Vercel URL shows real history from the overnight runs.
 

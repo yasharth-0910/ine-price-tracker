@@ -60,18 +60,23 @@ products.get(
       {
         id: string; source_product_id: string; name: string; url: string; category: string | null;
         consecutive_failures: number; layout_alert: boolean; last_attempt_at: Date | null; last_success_at: Date | null;
-        price: string | null; stock: string | null; stock_qty: number | null; scraped_at: Date | null; anomalous: boolean | null;
-        price_24h_ago: string | null;
+        price: string | null; currency: string | null; stock: string | null; stock_qty: number | null;
+        scraped_at: Date | null; anomalous: boolean | null; price_24h_ago: string | null;
+        history_count: number; last_error_code: string | null; last_error_at: Date | null;
+        sparkline: { t: string; price: number }[];
       }[]
     >`
       select
         p.id, p.source_product_id, p.name, p.url, p.category,
         p.consecutive_failures, p.layout_alert, p.last_attempt_at, p.last_success_at,
-        latest.price, latest.stock, latest.stock_qty, latest.scraped_at, latest.anomalous,
-        prev.price as price_24h_ago
+        latest.price, latest.currency, latest.stock, latest.stock_qty, latest.scraped_at, latest.anomalous,
+        prev.price as price_24h_ago,
+        hist.count as history_count,
+        err.error_code as last_error_code, err.created_at as last_error_at,
+        coalesce(spark.points, '[]'::json) as sparkline
       from products p
       left join lateral (
-        select price, stock, stock_qty, scraped_at, anomalous from price_history
+        select price, currency, stock, stock_qty, scraped_at, anomalous from price_history
         where product_id = p.id order by scraped_at desc limit 1
       ) latest on true
       left join lateral (
@@ -79,6 +84,21 @@ products.get(
         where product_id = p.id and scraped_at <= now() - interval '24 hours'
         order by scraped_at desc limit 1
       ) prev on true
+      left join lateral (
+        select count(*)::int as count from price_history where product_id = p.id
+      ) hist on true
+      -- Last real error, only surfaced while the product is actively failing.
+      left join lateral (
+        select error_code, created_at from scrape_logs
+        where product_id = p.id and error_code is not null and p.consecutive_failures > 0
+        order by created_at desc limit 1
+      ) err on true
+      -- Last 24h of price points for the row sparkline (oldest first), no N+1 from the client.
+      left join lateral (
+        select json_agg(json_build_object('t', scraped_at, 'price', price) order by scraped_at) as points
+        from price_history
+        where product_id = p.id and scraped_at >= now() - interval '24 hours'
+      ) spark on true
       where p.tracking_enabled = true
       order by p.created_at desc`;
 
@@ -104,7 +124,7 @@ products.get(
       return;
     }
     const [latest] = await sql`
-      select price, currency, stock, stock_qty, raw_price, anomalous, scraped_at, layout_revision, layout_variant
+      select price, currency, stock, stock_qty, raw_price, anomalous, scraped_at, layout_revision, layout_variant, extraction_source
       from price_history where product_id = ${product.id} order by scraped_at desc limit 1`;
     res.json({ product, latest: latest ?? null });
   }),
@@ -121,7 +141,7 @@ products.get(
       : range === '7d' ? sql`and scraped_at >= now() - interval '7 days'`
       : sql``;
     const history = await sql`
-      select price, currency, stock, stock_qty, raw_price, anomalous, layout_revision, layout_variant, scraped_at
+      select price, currency, stock, stock_qty, raw_price, anomalous, layout_revision, layout_variant, extraction_source, scraped_at
       from price_history where product_id = ${id} ${since} order by scraped_at asc`;
     res.json({ range, count: history.length, history });
   }),
