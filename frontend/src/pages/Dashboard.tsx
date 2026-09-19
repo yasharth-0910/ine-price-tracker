@@ -83,6 +83,7 @@ function runAttemptTotals(logs: ScrapeLog[]): Map<string, number> {
 function rangeDomain(range: HistoryRange, points: ChartPoint[]): [number, number] {
   const now = Date.now();
   if (range === '24h') return [now - DAY, now];
+  if (range === '3d') return [now - 3 * DAY, now];
   if (range === '7d') return [now - 7 * DAY, now];
   if (points.length === 0) return [now - 7 * DAY, now];
   const ts = points.map((p) => p.t);
@@ -634,7 +635,12 @@ export function Dashboard() {
                 </div>
 
                 <div className="flex items-center gap-1 font-mono text-[10px]">
-                  {(['24h', '7d', 'all'] as const).map((r) => (
+                  {([
+                    { id: '24h', label: '24hr' },
+                    { id: '3d', label: '3 days' },
+                    { id: '7d', label: '7 days' },
+                    { id: 'all', label: 'All' },
+                  ] as const).map(({ id: r, label }) => (
                     <button
                       key={r}
                       type="button"
@@ -646,7 +652,7 @@ export function Dashboard() {
                           : 'text-muted hover:bg-bg hover:text-ink')
                       }
                     >
-                      {r === 'all' ? 'All' : r}
+                      {label}
                     </button>
                   ))}
                 </div>

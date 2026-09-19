@@ -159,6 +159,7 @@ products.get(
     const range = String(req.query.range ?? 'all');
     const since =
       range === '24h' ? sql`and scraped_at >= now() - interval '24 hours'`
+      : range === '3d' ? sql`and scraped_at >= now() - interval '3 days'`
       : range === '7d' ? sql`and scraped_at >= now() - interval '7 days'`
       : sql``;
     const history = await sql`

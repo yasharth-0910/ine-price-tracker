@@ -102,6 +102,7 @@ function logDetail(l: ScrapeLog): string {
 function rangeDomain(range: HistoryRange, points: ChartPoint[]): [number, number] {
   const now = Date.now();
   if (range === '24h') return [now - DAY, now];
+  if (range === '3d') return [now - 3 * DAY, now];
   if (range === '7d') return [now - 7 * DAY, now];
   if (points.length === 0) return [now - 7 * DAY, now];
   const ts = points.map((p) => p.t);
@@ -328,7 +329,12 @@ export function ProductDetail() {
             </div>
           </div>
           <div className="inline-flex self-start rounded border border-rule p-0.5 font-mono text-[11px] sm:self-auto">
-            {(['24h', '7d', 'all'] as const).map((r) => (
+            {([
+              { id: '24h', label: '24hr' },
+              { id: '3d', label: '3 days' },
+              { id: '7d', label: '7 days' },
+              { id: 'all', label: 'All' },
+            ] as const).map(({ id: r, label }) => (
               <button
                 key={r}
                 type="button"
@@ -338,7 +344,7 @@ export function ProductDetail() {
                   (range === r ? 'bg-surface-hover font-medium text-ink' : 'text-muted hover:text-ink')
                 }
               >
-                {r === 'all' ? 'All' : r}
+                {label}
               </button>
             ))}
           </div>

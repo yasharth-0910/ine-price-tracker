@@ -355,12 +355,22 @@ export function PriceChart({
             )}
           </div>
         )}
+      </div>
 
-        {/* Compare hint / anchor state */}
-        <div className="pointer-events-none absolute bottom-1 left-2 font-mono text-mono-sm text-muted">
-          {anchor
-            ? `Anchor ${money(anchor.price)} · hover another point to compare · click it again to clear`
-            : 'Click a point to compare'}
+      {/* Clean Interaction & Status Sub-strip */}
+      <div className="mt-1 flex items-center justify-between border-t border-rule/50 px-1 pt-1.5 font-mono text-[11px] text-muted">
+        <div className="flex items-center gap-1.5">
+          <span className={`h-1.5 w-1.5 rounded-full ${anchor ? 'bg-retried animate-pulse' : 'bg-ok'}`} />
+          {anchor ? (
+            <span className="text-retried font-medium">
+              Anchor: {money(anchor.price)} · hover another point to compare delta · click anchor to clear
+            </span>
+          ) : (
+            <span>Click any node to anchor a price point and compare percentage change</span>
+          )}
+        </div>
+        <div className="hidden sm:block text-[10px] text-muted tabular-nums">
+          {points.length} data points
         </div>
       </div>
     </div>

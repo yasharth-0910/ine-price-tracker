@@ -164,7 +164,7 @@ export interface ScrapeResult {
   slowestAttemptMs: number;
 }
 
-export type HistoryRange = '24h' | '7d' | 'all';
+export type HistoryRange = '24h' | '3d' | '7d' | 'all';
 
 /** Thrown on any non-2xx; carries the HTTP status and the server's error text if present. */
 export class ApiError extends Error {
