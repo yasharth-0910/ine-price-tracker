@@ -7,3 +7,15 @@ dist/
 .DS_Store
 Software_Engineer_Intern_Assignment.pdf
 Software_Engineer_Intern_Assignment
+*.tsbuildinfo
+
+# Internal design mocks, prompts, and agent markdown
+instrument_panel_*
+precision_cron_scrape_monitor/
+prompts/
+.claude/
+frontend/design/
+AGENTS.md
+CLAUDE.md
+NOTES.md
+docs/
