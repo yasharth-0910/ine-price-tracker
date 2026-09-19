@@ -26,6 +26,7 @@ const OUTCOME: Record<ScrapeStatus, { block: string; text: string }> = {
   success: { block: 'bg-ok', text: 'text-ok' },
   retried: { block: 'bg-retried', text: 'text-retried' },
   failed: { block: 'bg-failed', text: 'text-failed' },
+  skipped_recent: { block: 'bg-muted', text: 'text-muted' },
 };
 
 function computeNextRun(runs: Run[]): Date | null {

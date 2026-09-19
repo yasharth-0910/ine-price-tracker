@@ -12,7 +12,7 @@ const BASE = (
 
 // ---- shared vocabulary (mirrors the DB enums / SPEC) ----
 export type StockStatus = 'in_stock' | 'low_stock' | 'out_of_stock';
-export type ScrapeStatus = 'success' | 'retried' | 'failed';
+export type ScrapeStatus = 'success' | 'retried' | 'failed' | 'skipped_recent';
 export type RunTrigger = 'cron' | 'manual' | 'headed';
 export type AlertKind = 'price_drop' | 'back_in_stock' | 'layout_change';
 export type ScrapeErrorCode =
