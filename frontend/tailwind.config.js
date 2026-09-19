@@ -14,6 +14,8 @@ export default {
         surface: {
           DEFAULT: 'var(--surface)',
           hover: 'var(--surface-hover)',
+          container: 'var(--surface-container)',
+          high: 'var(--surface-high)',
         },
         ink: 'var(--ink)',
         muted: 'var(--muted)',

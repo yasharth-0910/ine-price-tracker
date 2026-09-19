@@ -11,29 +11,33 @@
   :root is light; .dark overrides. tailwind.config.js maps each utility to var(--…).
 */
 :root {
-  --bg: #F6F7F5;
-  --surface: #FFFFFF;
-  --surface-hover: #EEF0ED; /* derived: DESIGN.md gives no light hover wash */
-  --ink: #15181B;
-  --muted: #5E6A6B;
-  --rule: #DDE1DE;
-  --status-ok: #2F6B4F;
-  --status-retried: #9C6B1F;
-  --status-failed: #9E3A2E;
-  --accent: #1F7A52; /* derived: brand green readable on light; dark value is from the export */
+  --bg: #f1f4f7;
+  --surface: #ffffff;
+  --surface-hover: #f8fafc;
+  --surface-container: #f1f5f9;
+  --surface-high: #e2e8f0;
+  --ink: #0f172a;
+  --muted: #64748b;
+  --rule: #e2e8f0;
+  --status-ok: #15803d;
+  --status-retried: #b45309;
+  --status-failed: #b91c1c;
+  --accent: #059669;
 }
 
 .dark {
-  --bg: #0E1113;
-  --surface: #161B1E;
-  --surface-hover: #1B2226;
-  --ink: #E7EAE8;
-  --muted: #8A9495;
-  --rule: #252C30;
-  --status-ok: #4E9B76;
-  --status-retried: #C79242;
-  --status-failed: #C4594A;
-  --accent: #88D7AE;
+  --bg: #0f1417;
+  --surface: #171c1f;
+  --surface-hover: #1b2023;
+  --surface-container: #1f2529;
+  --surface-high: #2b3236;
+  --ink: #dfe3e7;
+  --muted: #89938b;
+  --rule: #283035;
+  --status-ok: #88d7ae;
+  --status-retried: #f7bc68;
+  --status-failed: #ffb4ab;
+  --accent: #88d7ae;
 }
 
 @layer base {

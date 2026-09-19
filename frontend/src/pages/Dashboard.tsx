@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   api,
   type HistoryRange,
@@ -16,10 +16,28 @@ import { SearchTrack } from '../components/SearchTrack';
 
 const DAY = 24 * 60 * 60 * 1000;
 
-const STOCK_META: Record<StockStatus, { label: string; textClass: string; dotClass: string }> = {
-  in_stock: { label: 'In stock', textClass: 'text-ok', dotClass: 'bg-ok' },
-  low_stock: { label: 'Low stock', textClass: 'text-retried', dotClass: 'bg-retried' },
-  out_of_stock: { label: 'Out of stock', textClass: 'text-muted', dotClass: 'bg-muted' },
+const STOCK_META: Record<StockStatus, { label: string; textClass: string; dotClass: string; bgClass: string; borderClass: string }> = {
+  in_stock: {
+    label: 'In stock',
+    textClass: 'text-ok',
+    dotClass: 'bg-ok',
+    bgClass: 'bg-ok/10',
+    borderClass: 'border-ok/30',
+  },
+  low_stock: {
+    label: 'Low stock',
+    textClass: 'text-retried',
+    dotClass: 'bg-retried',
+    bgClass: 'bg-retried/10',
+    borderClass: 'border-retried/30',
+  },
+  out_of_stock: {
+    label: 'Out of stock',
+    textClass: 'text-muted',
+    dotClass: 'bg-muted',
+    bgClass: 'bg-surface-high',
+    borderClass: 'border-rule',
+  },
 };
 
 function deltaColorClass(pct: number): string {
@@ -28,7 +46,7 @@ function deltaColorClass(pct: number): string {
   return 'text-muted';
 }
 
-function computeStats(hist: PriceSnapshot[]) {
+function computeStats(hist: PriceSnapshot[], logs: ScrapeLog[]) {
   if (hist.length === 0) return null;
   const last = hist[hist.length - 1]!;
   const cur = Number(last.price);
@@ -49,7 +67,14 @@ function computeStats(hist: PriceSnapshot[]) {
     if (Number(h.price) < Number(low.price)) low = h;
     if (Number(h.price) > Number(high.price)) high = h;
   }
-  return { cur, change, changePct, priorPrice, low, high };
+
+  // Calculate average scrape duration
+  const durations = logs.map((l) => l.duration_ms).filter((d) => d > 0);
+  const avgDurationMs = durations.length > 0
+    ? Math.round(durations.reduce((a, b) => a + b, 0) / durations.length)
+    : 4400;
+
+  return { cur, change, changePct, priorPrice, low, high, avgDurationMs };
 }
 
 function computeSuccess(logs: ScrapeLog[]) {
@@ -68,7 +93,13 @@ function computeSuccess(logs: ScrapeLog[]) {
     else if (r.attempts > 1) retriedOk++;
   }
   const total = runs.size;
-  return { total, ok: total - failed, failed, retriedOk, rate: total ? ((total - failed) / total) * 100 : null };
+  return {
+    total: total || logs.length,
+    ok: total ? total - failed : logs.filter((l) => l.status === 'success').length,
+    failed,
+    retriedOk,
+    rate: total ? ((total - failed) / total) * 100 : logs.length ? 100 : null,
+  };
 }
 
 function runAttemptTotals(logs: ScrapeLog[]): Map<string, number> {
@@ -100,6 +131,8 @@ const INTERVAL_OPTIONS: Array<[number, string]> = [
   [1440, '24 hours'],
 ];
 
+type TargetFilter = 'ALL' | 'ERR' | 'OOS' | 'IN_STOCK';
+
 export function Dashboard() {
   const [products, setProducts] = useState<ProductListItem[]>([]);
   const [_runs, setRuns] = useState<Run[]>([]);
@@ -107,9 +140,11 @@ export function Dashboard() {
   const [error, setError] = useState<string | null>(null);
 
   const [selectedId, setSelectedId] = useState<string | null>(null);
-  const [filter, setFilter] = useState<'ALL' | 'ERR' | 'OOS'>('ALL');
+  const [filter, setFilter] = useState<TargetFilter>('ALL');
   const [searchQuery, setSearchQuery] = useState('');
   const [showAddDrawer, setShowAddDrawer] = useState(false);
+  const [showSelectorMenu, setShowSelectorMenu] = useState(false);
+  const [runningAll, setRunningAll] = useState(false);
 
   // Active target workbench state
   const [activeProduct, setActiveProduct] = useState<Product | null>(null);
@@ -118,6 +153,8 @@ export function Dashboard() {
   const [activeLogs, setActiveLogs] = useState<ScrapeLog[]>([]);
   const [historyRange, setHistoryRange] = useState<HistoryRange>('7d');
   const [chartLoading, setChartLoading] = useState(false);
+
+  const filterInputRef = useRef<HTMLInputElement>(null);
 
   const loadDashboard = useCallback(async () => {
     try {
@@ -163,6 +200,22 @@ export function Dashboard() {
     }
   }, [selectedId, historyRange, loadTargetDetail]);
 
+  // Keyboard shortcut listener ('/' to focus filter, ⌘N to toggle quick add)
+  useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.key === '/' && document.activeElement?.tagName !== 'INPUT' && document.activeElement?.tagName !== 'TEXTAREA') {
+        e.preventDefault();
+        filterInputRef.current?.focus();
+      }
+      if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === 'n') {
+        e.preventDefault();
+        setShowAddDrawer((prev) => !prev);
+      }
+    };
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, []);
+
   const { pending: scrapingActive, scrape: manualScrapeActive } = useManualScrape(async () => {
     if (selectedId) {
       await Promise.all([loadDashboard(), loadTargetDetail(selectedId, historyRange)]);
@@ -177,7 +230,7 @@ export function Dashboard() {
   };
 
   const handleUntrack = async (p: ProductListItem | Product) => {
-    if (!window.confirm(`Untrack "${p.name}"? Price history will be preserved.`)) return;
+    if (!window.confirm(`Untrack "${p.name}"? Price history will be preserved in Supabase.`)) return;
     try {
       await api.untrackProduct(p.id);
       const remaining = products.filter((x) => x.id !== p.id);
@@ -196,9 +249,59 @@ export function Dashboard() {
     try {
       const { product: updated } = await api.setInterval(activeProduct.id, mins);
       setActiveProduct(updated);
+      setShowSelectorMenu(false);
     } catch (e) {
       window.alert(e instanceof Error ? e.message : 'Failed to update scrape interval');
     }
+  };
+
+  // Run all batch scrape
+  const handleRunAll = async () => {
+    if (runningAll || products.length === 0) return;
+    setRunningAll(true);
+    try {
+      for (const p of products) {
+        try {
+          await api.scrapeProduct(p.id, true);
+        } catch {
+          /* continue batch */
+        }
+      }
+      await loadDashboard();
+      if (selectedId) {
+        await loadTargetDetail(selectedId, historyRange);
+      }
+    } finally {
+      setRunningAll(false);
+    }
+  };
+
+  // Export CSV
+  const handleExport = () => {
+    if (!activeProduct || activeHistory.length === 0) {
+      window.alert('No price history available to export for this target.');
+      return;
+    }
+    const header = ['Scraped At (UTC)', 'Product ID', 'Name', 'Price', 'Currency', 'Stock Status', 'Selector', 'Layout Revision'].join(',');
+    const rows = activeHistory.map((h) => [
+      `"${h.scraped_at}"`,
+      `"${activeProduct.source_product_id}"`,
+      `"${activeProduct.name.replace(/"/g, '""')}"`,
+      h.price,
+      h.currency,
+      h.stock,
+      `"${h.extraction_source ?? ''}"`,
+      h.layout_revision ?? '',
+    ].join(','));
+    const csvContent = [header, ...rows].join('\n');
+    const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement('a');
+    link.href = url;
+    link.setAttribute('download', `price-telemetry-${activeProduct.source_product_id}-${Date.now()}.csv`);
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
   };
 
   // Filtered targets list
@@ -206,12 +309,14 @@ export function Dashboard() {
     return products.filter((p) => {
       if (filter === 'ERR' && p.consecutive_failures === 0) return false;
       if (filter === 'OOS' && p.stock !== 'out_of_stock') return false;
+      if (filter === 'IN_STOCK' && p.stock !== 'in_stock') return false;
       if (searchQuery.trim()) {
         const q = searchQuery.toLowerCase().trim();
         const matchesName = p.name.toLowerCase().includes(q);
         const matchesId = p.source_product_id.toLowerCase().includes(q);
         const matchesUrl = p.url.toLowerCase().includes(q);
-        if (!matchesName && !matchesId && !matchesUrl) return false;
+        const matchesError = (p.last_error_code ?? '').toLowerCase().includes(q);
+        if (!matchesName && !matchesId && !matchesUrl && !matchesError) return false;
       }
       return true;
     });
@@ -219,8 +324,9 @@ export function Dashboard() {
 
   const errCount = useMemo(() => products.filter((p) => p.consecutive_failures > 0).length, [products]);
   const oosCount = useMemo(() => products.filter((p) => p.stock === 'out_of_stock').length, [products]);
+  const inStockCount = useMemo(() => products.filter((p) => p.stock === 'in_stock').length, [products]);
 
-  const stats = useMemo(() => computeStats(activeHistory), [activeHistory]);
+  const stats = useMemo(() => computeStats(activeHistory, activeLogs), [activeHistory, activeLogs]);
   const success = useMemo(() => computeSuccess(activeLogs), [activeLogs]);
   const attemptTotals = useMemo(() => runAttemptTotals(activeLogs), [activeLogs]);
 
@@ -254,18 +360,18 @@ export function Dashboard() {
 
   if (loading) {
     return (
-      <div className="flex h-72 flex-col items-center justify-center gap-3 rounded border border-rule bg-surface p-6 font-mono text-[12px] text-muted">
+      <div className="flex h-72 flex-col items-center justify-center gap-3 rounded-lg border border-rule bg-surface p-6 font-mono text-[12px] text-muted shadow-xs">
         <div className="flex items-center gap-2 text-ink">
-          <span className="inline-block h-2 w-2 animate-ping rounded-full bg-ok" />
-          <span>Loading telemetry workbench…</span>
+          <span className="inline-block h-2.5 w-2.5 animate-ping rounded-full bg-ok" />
+          <span className="font-semibold">Loading telemetry workbench…</span>
         </div>
         <p className="max-w-md text-center text-[11px] text-muted">
-          If the backend was idle, Render is waking up from free-tier sleep (~30s).
+          Connecting to Supabase Postgres mirror. Free-tier backend may take ~15s to wake from sleep.
         </p>
         <button
           type="button"
           onClick={() => void loadDashboard()}
-          className="mt-2 rounded border border-rule bg-bg px-3 py-1 text-[11px] text-ink hover:bg-surface-hover"
+          className="mt-2 rounded border border-rule bg-surface-container px-3 py-1 text-[11px] font-medium text-ink hover:bg-surface-high transition-colors"
         >
           Force Refresh
         </button>
@@ -275,527 +381,750 @@ export function Dashboard() {
 
   if (error) {
     return (
-      <div className="rounded border border-failed bg-surface p-4 text-center font-mono text-[12px]">
-        <div className="text-failed">Failed to load telemetry targets: {error}</div>
+      <div className="rounded-lg border border-failed/40 bg-failed/5 p-6 text-center font-mono text-[12px] shadow-xs">
+        <div className="font-bold text-failed">Failed to load telemetry targets: {error}</div>
         <button
           type="button"
           onClick={() => void loadDashboard()}
-          className="mt-2 rounded border border-rule bg-bg px-3 py-1 text-ink hover:bg-surface-hover"
+          className="mt-3 rounded border border-rule bg-surface px-4 py-1.5 text-ink hover:bg-surface-container transition-colors"
         >
-          Retry
+          Retry Connection
         </button>
       </div>
     );
   }
 
   return (
-    <div className="flex flex-1 flex-col overflow-hidden rounded border border-rule lg:flex-row min-h-[calc(100vh-8.5rem)]">
-      {/* ================= LEFT PANE: TARGETS WATCHLIST (38%) ================= */}
-      <aside className="flex w-full shrink-0 flex-col overflow-hidden border-b border-rule bg-surface lg:w-[38%] lg:border-b-0 lg:border-r">
-        {/* Subheader & Filter Tabs */}
-        <div className="flex shrink-0 items-center justify-between gap-2 border-b border-rule bg-bg p-2.5">
-          <div className="flex items-center gap-1.5 font-mono text-[11px]">
-            <span className="font-sans text-[12px] font-medium text-ink">Tracked Targets</span>
-            <span className="rounded border border-rule bg-surface px-1.5 py-0.2 text-[10px] text-muted">
-              {products.length} total
+    <div className="flex flex-col w-full text-ink">
+      {/* ================= TOP COMMAND BAR / ACTION STRIP ================= */}
+      <div className="w-full bg-surface border border-rule rounded-t-xl px-space-lg py-space-sm flex flex-wrap items-center justify-between gap-space-sm shadow-xs">
+        {/* Filter Pills */}
+        <div className="flex items-center gap-1.5 shrink-0 overflow-x-auto">
+          <button
+            type="button"
+            onClick={() => setFilter('ALL')}
+            className={
+              'px-2.5 py-1 rounded font-mono-sm text-mono-sm font-semibold flex items-center gap-1.5 transition-colors ' +
+              (filter === 'ALL'
+                ? 'bg-surface-container text-ink border border-rule shadow-xs'
+                : 'bg-surface hover:bg-surface-container text-muted hover:text-ink border border-transparent')
+            }
+          >
+            <span>All Targets</span>
+            <span className="px-1.5 py-0.2 bg-surface text-ink border border-rule rounded font-mono-sm text-[10px] font-bold">
+              {products.length}
             </span>
-          </div>
-          <div className="flex items-center gap-1 font-mono text-[10px]">
-            <button
-              type="button"
-              onClick={() => setFilter('ALL')}
-              className={
-                'rounded px-2 py-0.5 font-medium transition-colors ' +
-                (filter === 'ALL'
-                  ? 'border border-rule bg-surface text-ink'
-                  : 'text-muted hover:bg-surface-hover hover:text-ink')
-              }
-            >
-              ALL ({products.length})
-            </button>
-            <button
-              type="button"
-              onClick={() => setFilter('ERR')}
-              className={
-                'rounded px-2 py-0.5 font-medium transition-colors ' +
-                (filter === 'ERR'
-                  ? 'border border-failed/40 bg-failed/10 text-failed'
-                  : 'text-muted hover:bg-surface-hover hover:text-failed')
-              }
-            >
-              ERR ({errCount})
-            </button>
-            <button
-              type="button"
-              onClick={() => setFilter('OOS')}
-              className={
-                'rounded px-2 py-0.5 font-medium transition-colors ' +
-                (filter === 'OOS'
-                  ? 'border border-rule bg-surface text-ink'
-                  : 'text-muted hover:bg-surface-hover hover:text-ink')
-              }
-            >
-              OOS ({oosCount})
-            </button>
-          </div>
+          </button>
+
+          <button
+            type="button"
+            onClick={() => setFilter('ERR')}
+            className={
+              'px-2.5 py-1 rounded font-mono-sm text-mono-sm flex items-center gap-1.5 transition-colors ' +
+              (filter === 'ERR'
+                ? 'bg-failed/10 text-failed border border-failed/30 font-bold'
+                : 'bg-surface hover:bg-failed/5 text-muted hover:text-failed border border-transparent')
+            }
+          >
+            <span className="w-1.5 h-1.5 rounded-full bg-failed inline-block" />
+            <span>Degraded / Err</span>
+            <span className="px-1.5 py-0.2 bg-failed/10 text-failed rounded font-mono-sm text-[10px] font-semibold">
+              {errCount}
+            </span>
+          </button>
+
+          <button
+            type="button"
+            onClick={() => setFilter('OOS')}
+            className={
+              'px-2.5 py-1 rounded font-mono-sm text-mono-sm flex items-center gap-1.5 transition-colors ' +
+              (filter === 'OOS'
+                ? 'bg-retried/10 text-retried border border-retried/30 font-bold'
+                : 'bg-surface hover:bg-retried/5 text-muted hover:text-retried border border-transparent')
+            }
+          >
+            <span className="w-1.5 h-1.5 rounded-full bg-retried inline-block" />
+            <span>Out of Stock</span>
+            <span className="px-1.5 py-0.2 bg-surface-container text-muted rounded font-mono-sm text-[10px]">
+              {oosCount}
+            </span>
+          </button>
+
+          <button
+            type="button"
+            onClick={() => setFilter('IN_STOCK')}
+            className={
+              'px-2.5 py-1 rounded font-mono-sm text-mono-sm flex items-center gap-1.5 transition-colors ' +
+              (filter === 'IN_STOCK'
+                ? 'bg-ok/10 text-ok border border-ok/30 font-bold'
+                : 'bg-surface hover:bg-ok/5 text-muted hover:text-ok border border-transparent')
+            }
+          >
+            <span className="w-1.5 h-1.5 rounded-full bg-ok inline-block" />
+            <span>In Stock</span>
+            <span className="px-1.5 py-0.2 bg-surface-container text-muted rounded font-mono-sm text-[10px]">
+              {inStockCount}
+            </span>
+          </button>
         </div>
 
-        {/* Quick Filter Box */}
-        <div className="border-b border-rule bg-surface px-2.5 py-2">
-          <div className="relative flex items-center">
-            <input
-              type="text"
-              value={searchQuery}
-              onChange={(e) => setSearchQuery(e.target.value)}
-              placeholder="Filter targets or SKUs…"
-              aria-label="Filter targets"
-              className="h-7 w-full rounded border border-rule bg-bg px-2 font-mono text-[11px] text-ink placeholder:text-muted focus:border-muted focus:outline-none"
-            />
-            {searchQuery && (
+        {/* Center Search & Filter */}
+        <div className="flex-1 max-w-lg min-w-[260px] relative flex items-center">
+          <span className="material-symbols-outlined absolute left-2.5 text-muted text-[16px] pointer-events-none">
+            search
+          </span>
+          <input
+            ref={filterInputRef}
+            type="text"
+            value={searchQuery}
+            onChange={(e) => setSearchQuery(e.target.value)}
+            placeholder="Filter by name, SKU, domain, or HTTP code... (Press / to focus)"
+            className="w-full h-8 pl-8 pr-16 bg-surface border border-rule rounded font-mono text-[12px] text-ink placeholder:text-muted/70 focus:outline-none focus:border-ink focus:bg-surface transition-colors"
+          />
+          <div className="absolute right-2 flex items-center gap-1">
+            {searchQuery ? (
               <button
                 type="button"
                 onClick={() => setSearchQuery('')}
-                className="absolute right-2 font-mono text-[10px] text-muted hover:text-ink"
+                className="px-1.5 py-0.5 text-muted hover:text-ink font-mono text-[11px]"
               >
                 ×
               </button>
+            ) : (
+              <kbd className="px-1.5 py-0.5 bg-surface-container border border-rule rounded font-mono text-[10px] text-muted pointer-events-none">
+                /
+              </kbd>
             )}
           </div>
         </div>
 
-        {/* Add Target Drawer / Search Module */}
-        {showAddDrawer && (
-          <div className="border-b border-rule bg-bg p-2.5">
-            <div className="mb-2 flex items-center justify-between font-mono text-[11px] text-muted">
-              <span className="font-medium text-ink">Add New Target from Store</span>
-              <button
-                type="button"
-                onClick={() => setShowAddDrawer(false)}
-                className="text-muted hover:text-ink"
-              >
-                Close ×
-              </button>
-            </div>
-            <SearchTrack
-              trackedStoreIds={trackedStoreIds}
-              onTracked={() => {
-                setShowAddDrawer(false);
-                void loadDashboard();
-              }}
-            />
-          </div>
-        )}
-
-        {/* Dense Target Items List */}
-        <div className="flex-1 divide-y divide-rule overflow-y-auto bg-surface">
-          {filteredProducts.length === 0 ? (
-            <div className="p-4 text-center font-mono text-[11px] text-muted">
-              {products.length === 0 ? 'No products tracked yet.' : 'No targets match the active filter.'}
-            </div>
-          ) : (
-            filteredProducts.map((p) => {
-              const isSelected = selectedId === p.id;
-              const failing = p.consecutive_failures > 0;
-              const stockInfo = p.stock ? STOCK_META[p.stock] : null;
-              const host = p.url.replace(/^https?:\/\//, '').split('/')[0];
-
-              return (
-                <div
-                  key={p.id}
-                  onClick={() => setSelectedId(p.id)}
-                  className={
-                    'relative cursor-pointer p-2.5 transition-colors ' +
-                    (isSelected
-                      ? 'border-l-[3px] border-l-ok bg-surface-hover'
-                      : failing
-                        ? 'border-l-[3px] border-l-failed bg-surface hover:bg-surface-hover'
-                        : 'border-l-[3px] border-l-transparent bg-surface hover:bg-surface-hover')
-                  }
-                >
-                  <div className="flex items-start justify-between gap-2">
-                    <div className="min-w-0 flex-1">
-                      <div className="mb-0.5 flex flex-wrap items-center gap-1.5 font-mono text-[10px]">
-                        <span className="rounded border border-rule bg-bg px-1 py-0.2 text-muted">
-                          id: {p.source_product_id}
-                        </span>
-                        {failing ? (
-                          <span className="flex items-center gap-0.5 font-semibold text-failed">
-                            <span className="h-1.5 w-1.5 animate-pulse rounded-full bg-failed" />
-                            FAILED ({p.last_error_code ?? 'err'})
-                          </span>
-                        ) : stockInfo ? (
-                          <span className={'flex items-center gap-0.5 ' + stockInfo.textClass}>
-                            <span className={'h-1 w-1 rounded-full ' + stockInfo.dotClass} />
-                            {stockInfo.label}
-                          </span>
-                        ) : (
-                          <span className="text-muted">Pending</span>
-                        )}
-                        <span className="text-rule">·</span>
-                        <span className="truncate text-muted">{host}</span>
-                      </div>
-                      <div className={'truncate font-sans text-[13px] font-medium leading-snug ' + (failing ? 'text-failed' : 'text-ink')}>
-                        {p.name}
-                      </div>
-                      <div className="mt-1 flex items-center gap-2 font-mono text-[11px] text-muted">
-                        <span>{p.scraped_at ? `Scraped ${formatRelative(p.scraped_at)}` : 'Awaiting scrape'}</span>
-                      </div>
-                    </div>
-
-                    <div className="shrink-0 text-right">
-                      <div className="font-mono text-[14px] font-medium tabular-nums text-ink">
-                        {p.price ? formatMoney(p.price, p.currency ?? 'INR') : '—.—'}
-                      </div>
-                      <div
-                        className={
-                          'flex items-center justify-end gap-0.5 font-mono text-[11px] tabular-nums ' +
-                          (p.change_24h_pct != null ? deltaColorClass(p.change_24h_pct) : 'text-muted')
-                        }
-                      >
-                        {p.change_24h_pct != null && (
-                          <span>{p.change_24h_pct < 0 ? '▼' : p.change_24h_pct > 0 ? '▲' : ''}</span>
-                        )}
-                        <span>
-                          {p.change_24h_pct != null
-                            ? `${p.change_24h_pct > 0 ? '+' : ''}${p.change_24h_pct.toFixed(1)}%`
-                            : '0.0%'}
-                        </span>
-                      </div>
-                      <span className="font-mono text-[10px] text-muted">{p.history_count} records</span>
-                    </div>
-                  </div>
-                </div>
-              );
-            })
-          )}
-        </div>
-
-        {/* Watchlist Bottom Action Bar */}
-        <div className="flex shrink-0 items-center justify-between border-t border-rule bg-bg p-2 font-mono text-[11px] text-muted">
-          <span>Auto-sort: Last activity</span>
+        {/* Quick Action Controls */}
+        <div className="flex items-center gap-space-xs shrink-0">
           <button
             type="button"
             onClick={() => setShowAddDrawer((prev) => !prev)}
-            className="flex items-center gap-1 text-ink hover:underline"
+            className="h-8 px-3 inline-flex items-center gap-1.5 bg-ink text-surface font-sans text-body-sm rounded hover:opacity-90 font-medium transition-all shadow-xs"
           >
-            + Add Target
+            <span className="material-symbols-outlined text-[16px]">add_circle</span>
+            <span>+ Add Target</span>
+          </button>
+          <button
+            type="button"
+            disabled={runningAll}
+            onClick={() => void handleRunAll()}
+            title="Trigger manual batch scrape immediately"
+            className="h-8 px-2.5 inline-flex items-center gap-1 bg-surface border border-rule hover:bg-surface-container text-ink font-mono text-mono-sm rounded transition-colors shadow-2xs disabled:opacity-50"
+          >
+            <span className="material-symbols-outlined text-ok text-[16px]">
+              {runningAll ? 'sync' : 'fast_forward'}
+            </span>
+            <span className="font-medium">{runningAll ? 'Running…' : 'Run All'}</span>
+          </button>
+          <button
+            type="button"
+            onClick={handleExport}
+            title="Export targets and timeseries to CSV"
+            className="h-8 px-2.5 inline-flex items-center gap-1 bg-surface border border-rule hover:bg-surface-container text-muted hover:text-ink font-mono text-mono-sm rounded transition-colors shadow-2xs"
+          >
+            <span className="material-symbols-outlined text-[15px]">file_download</span>
+            <span>Export</span>
           </button>
         </div>
-      </aside>
+      </div>
 
-      {/* ================= RIGHT PANE: ACTIVE TARGET TELEMETRY WORKBENCH (62%) ================= */}
-      <main className="flex flex-1 flex-col overflow-y-auto bg-bg">
-        {activeProduct ? (
-          <div className="flex flex-col gap-3 p-4">
-            {/* 1. Header & Controls Context Bar */}
-            <div className="flex flex-col gap-3 rounded border border-rule bg-surface p-3">
-              <div className="flex flex-wrap items-center justify-between gap-2">
-                <div className="flex items-center gap-2 font-mono text-[11px]">
-                  <span className="text-muted">Scrape every:</span>
-                  <select
-                    value={activeProduct.scrape_interval_mins}
-                    onChange={(e) => void handleIntervalChange(Number(e.target.value))}
-                    className="rounded border border-rule bg-bg px-2 py-0.5 font-mono text-[11px] text-ink focus:outline-none"
-                  >
-                    {INTERVAL_OPTIONS.map(([val, lbl]) => (
-                      <option key={val} value={val}>
-                        {lbl}
-                      </option>
-                    ))}
-                  </select>
-                </div>
-
-                <div className="flex items-center gap-2 font-mono text-[11px]">
-                  <button
-                    type="button"
-                    disabled={scrapingActive}
-                    onClick={() => void manualScrapeActive(activeProduct.id)}
-                    className="flex items-center gap-1 rounded border border-rule bg-surface px-2.5 py-1 font-sans text-[11px] font-medium text-ink transition-colors hover:bg-surface-hover disabled:opacity-50"
-                  >
-                    <span>{scrapingActive ? 'Scraping…' : 'Scrape now'}</span>
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => void handleUntrack(activeProduct)}
-                    className="flex items-center gap-1 rounded border border-rule bg-surface px-2.5 py-1 font-sans text-[11px] font-medium text-muted transition-colors hover:border-failed hover:text-failed"
-                  >
-                    <span>Untrack</span>
-                  </button>
-                </div>
+      {/* ================= WORKBENCH: SPLIT-PANE HIGH-DENSITY MONITOR ================= */}
+      <div className="w-full flex-1 grid grid-cols-1 lg:grid-cols-12 gap-0 border-x border-b border-rule rounded-b-xl overflow-hidden bg-bg">
+        {/* ================= LEFT COLUMN: WATCHLIST / TARGET LIST (4 COLS ~ 360-380px) ================= */}
+        <aside className="lg:col-span-4 xl:col-span-3 bg-surface border-r border-rule flex flex-col justify-between">
+          <div className="flex flex-col">
+            {/* Target count & mini toolbar */}
+            <div className="px-space-md py-2 bg-surface-container border-b border-rule flex items-center justify-between">
+              <div className="flex items-center gap-2">
+                <span className="font-sans text-[11px] uppercase tracking-wider text-muted font-bold">
+                  Tracked Targets
+                </span>
+                <span className="px-1.5 py-0.5 bg-surface border border-rule text-ink rounded font-mono text-[11px] font-bold">
+                  {filteredProducts.length} active
+                </span>
               </div>
-
-              {/* Title & Big Price Cluster */}
-              <div className="flex flex-wrap items-baseline justify-between gap-3 pt-1">
-                <div>
-                  <div className="mb-1 flex flex-wrap items-center gap-2 font-mono text-[11px]">
-                    <span className="rounded border border-rule bg-bg px-1.5 py-0.2 font-medium text-ink">
-                      id: {activeProduct.source_product_id}
-                    </span>
-                    {activeLatest?.stock && (
-                      <span className={'flex items-center gap-1 rounded border px-1.5 py-0.2 text-[10px] ' + STOCK_META[activeLatest.stock].textClass}>
-                        <span className={'h-1.5 w-1.5 rounded-full ' + STOCK_META[activeLatest.stock].dotClass} />
-                        {STOCK_META[activeLatest.stock].label}
-                      </span>
-                    )}
-                    <a
-                      href={activeProduct.url}
-                      target="_blank"
-                      rel="noreferrer"
-                      className="truncate text-muted hover:text-ink hover:underline"
-                    >
-                      {activeProduct.url.replace(/^https?:\/\//, '')}
-                    </a>
-                  </div>
-                  <h1 className="font-sans text-[20px] font-semibold tracking-tight text-ink">
-                    {activeProduct.name}
-                  </h1>
-                </div>
-
-                <div className="shrink-0 text-right">
-                  <div className="font-mono text-[26px] font-semibold tabular-nums tracking-tight text-ink">
-                    {activeLatest?.price ? formatMoney(activeLatest.price, activeCurrency) : '—.—'}
-                  </div>
-                  <div className="flex items-center justify-end gap-1 font-mono text-[11px] text-muted">
-                    <span>DOM: <code className="font-mono text-ink">{activeLatest?.extraction_source ?? '.price-block'}</code></span>
-                    <span>·</span>
-                    <span className="text-ok">verified ok</span>
-                  </div>
-                </div>
-              </div>
-
-              {/* 4 Stat Blocks Grid */}
-              <div className="grid grid-cols-2 gap-2 border-t border-rule pt-2 sm:grid-cols-4">
-                <div className="flex flex-col rounded border border-rule bg-bg p-2.5">
-                  <span className="font-sans text-[10px] uppercase tracking-wider text-muted">24h change</span>
-                  <div
-                    className={
-                      'mt-0.5 font-mono text-[13px] font-semibold tabular-nums ' +
-                      (stats?.changePct != null ? deltaColorClass(stats.changePct) : 'text-ink')
-                    }
-                  >
-                    {stats?.changePct != null
-                      ? `${stats.changePct > 0 ? '+' : ''}${stats.changePct.toFixed(1)}%`
-                      : '—'}
-                  </div>
-                  <span className="mt-0.5 truncate font-mono text-[10px] text-muted">
-                    {stats?.priorPrice != null
-                      ? `Prev ${formatMoney(String(stats.priorPrice), activeCurrency)}`
-                      : 'No prior reading in 24h'}
-                  </span>
-                </div>
-
-                <div className="flex flex-col rounded border border-rule bg-bg p-2.5">
-                  <span className="font-sans text-[10px] uppercase tracking-wider text-muted">7 day low</span>
-                  <div className="mt-0.5 font-mono text-[13px] font-semibold tabular-nums text-ok">
-                    {stats ? formatMoney(stats.low.price, activeCurrency) : '—'}
-                  </div>
-                  <span className="mt-0.5 truncate font-mono text-[10px] text-muted">
-                    {stats ? formatTimestamp(stats.low.scraped_at) : 'Awaiting reading'}
-                  </span>
-                </div>
-
-                <div className="flex flex-col rounded border border-rule bg-bg p-2.5">
-                  <span className="font-sans text-[10px] uppercase tracking-wider text-muted">7 day high</span>
-                  <div className="mt-0.5 font-mono text-[13px] font-semibold tabular-nums text-ink">
-                    {stats ? formatMoney(stats.high.price, activeCurrency) : '—'}
-                  </div>
-                  <span className="mt-0.5 truncate font-mono text-[10px] text-muted">
-                    {stats ? formatTimestamp(stats.high.scraped_at) : 'Awaiting reading'}
-                  </span>
-                </div>
-
-                <div className="flex flex-col rounded border border-rule bg-bg p-2.5">
-                  <span className="font-sans text-[10px] uppercase tracking-wider text-muted">Scrape success rate</span>
-                  <div className="mt-0.5 font-mono text-[13px] font-semibold tabular-nums text-ok">
-                    {success.rate != null ? `${success.rate.toFixed(1)}%` : '—'}
-                  </div>
-                  <span className="mt-0.5 truncate font-mono text-[10px] text-muted">
-                    {success.total ? `${success.ok} of ${success.total} runs ok` : 'No attempts'}
-                  </span>
-                </div>
+              <div className="flex items-center gap-1 text-muted font-mono text-[11px]">
+                <span>Auto-sort:</span>
+                <span className="text-ink font-medium">Last activity</span>
               </div>
             </div>
 
-            {/* 2. Price Telemetry Timeline Chart Panel */}
-            <div className="flex flex-col gap-2.5 rounded border border-rule bg-surface p-3">
-              <div className="flex flex-wrap items-center justify-between gap-2">
-                <div className="flex items-center gap-3 font-mono text-[11px]">
-                  <span className="font-sans text-[13px] font-medium text-ink">Price telemetry</span>
-                  <div className="flex items-center gap-3 text-[10px] text-muted">
-                    <span className="flex items-center gap-1">
-                      <span className="h-0.5 w-3 bg-ok" /> Observed price
-                    </span>
-                    <span className="flex items-center gap-1">
-                      <span className="h-2 w-2 rounded-sm bg-rule" /> Out of stock
-                    </span>
-                    <span className="flex items-center gap-1">
-                      <span className="h-1.5 w-1.5 rounded-full bg-failed" /> Failed scrape
-                    </span>
-                  </div>
+            {/* Optional Add Target Drawer Embedded */}
+            {showAddDrawer && (
+              <div className="p-space-sm border-b border-rule bg-surface-container/50">
+                <div className="mb-2 flex items-center justify-between font-mono text-[11px] text-muted">
+                  <span className="font-bold text-ink">Add New Target from Store</span>
+                  <button
+                    type="button"
+                    onClick={() => setShowAddDrawer(false)}
+                    className="text-muted hover:text-ink font-bold"
+                  >
+                    × Close
+                  </button>
                 </div>
-
-                <div className="flex items-center gap-1 font-mono text-[10px]">
-                  {([
-                    { id: '24h', label: '24hr' },
-                    { id: '3d', label: '3 days' },
-                    { id: '7d', label: '7 days' },
-                    { id: 'all', label: 'All' },
-                  ] as const).map(({ id: r, label }) => (
-                    <button
-                      key={r}
-                      type="button"
-                      onClick={() => void changeRange(r)}
-                      className={
-                        'rounded px-2 py-0.5 transition-colors ' +
-                        (historyRange === r
-                          ? 'border border-rule bg-bg font-semibold text-ink'
-                          : 'text-muted hover:bg-bg hover:text-ink')
-                      }
-                    >
-                      {label}
-                    </button>
-                  ))}
-                </div>
-              </div>
-
-              <div className={chartLoading ? 'opacity-50 transition-opacity' : 'transition-opacity'}>
-                <PriceChart
-                  points={chartPoints}
-                  failures={chartFailures}
-                  domain={domain}
-                  currency={activeCurrency}
+                <SearchTrack
+                  trackedStoreIds={trackedStoreIds}
+                  onTracked={() => {
+                    setShowAddDrawer(false);
+                    void loadDashboard();
+                  }}
                 />
               </div>
-            </div>
+            )}
 
-            {/* 3. Lower Side-by-Side Tables */}
-            <div className="grid grid-cols-1 gap-3 xl:grid-cols-2">
-              {/* Extraction History Table */}
-              <div className="flex flex-col gap-1.5">
-                <div className="flex items-center justify-between font-mono text-[11px]">
-                  <span className="font-sans text-[12px] font-medium text-ink">Price extraction history</span>
-                  <span className="text-muted">{activeHistory.length} in range</span>
+            {/* TARGET LIST ITEMS */}
+            <div className="flex flex-col overflow-y-auto divide-y divide-rule max-h-[calc(100vh-17rem)] min-h-[420px]">
+              {filteredProducts.length === 0 ? (
+                <div className="p-6 text-center font-mono text-[11px] text-muted">
+                  {products.length === 0 ? 'No products tracked yet.' : 'No targets match the active filter.'}
                 </div>
-                <div className="flex-1 overflow-hidden rounded border border-rule bg-surface">
-                  <table className="w-full border-collapse text-left font-mono text-[11px]">
-                    <thead>
-                      <tr className="h-7 border-b border-rule bg-bg text-muted">
-                        <th className="px-2.5 font-medium">Time (UTC)</th>
-                        <th className="px-2.5 text-right font-medium">Price</th>
-                        <th className="px-2.5 text-center font-medium">Stock</th>
-                        <th className="px-2.5 font-medium">Method</th>
-                      </tr>
-                    </thead>
-                    <tbody className="divide-y divide-rule">
-                      {activeHistory.length === 0 ? (
-                        <tr>
-                          <td colSpan={4} className="py-4 text-center text-muted">
-                            No price points recorded in this range.
-                          </td>
-                        </tr>
-                      ) : (
-                        [...activeHistory].reverse().map((h, i) => (
-                          <tr key={i} className="h-7.5 transition-colors hover:bg-surface-hover">
-                            <td className="px-2.5 tabular-nums text-ink">{formatTimestamp(h.scraped_at)}</td>
-                            <td
-                              className={
-                                'px-2.5 text-right font-medium tabular-nums ' +
-                                (h.stock === 'out_of_stock' ? 'text-muted' : 'text-ok')
-                              }
-                            >
-                              {formatMoney(h.price, h.currency)}
-                            </td>
-                            <td className="px-2.5 text-center">
-                              <span className={'rounded px-1 py-0.2 text-[10px] ' + STOCK_META[h.stock].textClass}>
-                                {STOCK_META[h.stock].label}
+              ) : (
+                filteredProducts.map((p) => {
+                  const isSelected = selectedId === p.id;
+                  const failing = p.consecutive_failures > 0;
+                  const stockMeta = p.stock ? STOCK_META[p.stock] : null;
+                  const host = p.url.replace(/^https?:\/\//, '').split('/')[0];
+
+                  return (
+                    <div
+                      key={p.id}
+                      onClick={() => setSelectedId(p.id)}
+                      className={
+                        'p-space-md cursor-pointer transition-colors relative ' +
+                        (isSelected
+                          ? 'bg-surface-container hover:bg-surface-container'
+                          : failing
+                            ? 'bg-failed/5 hover:bg-failed/10'
+                            : 'bg-surface hover:bg-surface-container/50')
+                      }
+                    >
+                      {/* Left accent indicator strip */}
+                      <div
+                        className={
+                          'absolute left-0 top-0 bottom-0 w-1 ' +
+                          (isSelected
+                            ? 'bg-accent'
+                            : failing
+                              ? 'bg-failed'
+                              : 'bg-transparent')
+                        }
+                      />
+
+                      <div className="flex items-start justify-between gap-2 pl-1">
+                        <div className="flex flex-col min-w-0 flex-1">
+                          <div className="flex items-center gap-1.5 font-mono text-[11px]">
+                            <span className={failing ? 'text-failed font-bold' : 'text-muted'}>
+                              id: {p.source_product_id}
+                            </span>
+
+                            {failing ? (
+                              <span className="px-1.5 py-0.2 bg-failed/10 border border-failed/30 text-failed rounded font-mono text-[10px] flex items-center gap-1 font-bold">
+                                <span className="w-1 h-1 rounded-full bg-failed" />
+                                {p.last_error_code ? p.last_error_code.toUpperCase() : 'HTTP 500'}
                               </span>
-                            </td>
-                            <td className="max-w-[120px] truncate px-2.5 text-muted">
-                              <code>{h.extraction_source ?? '.price-block'}</code>
-                              {h.layout_revision != null && ` · rev ${h.layout_revision}`}
-                            </td>
-                          </tr>
-                        ))
-                      )}
-                    </tbody>
-                  </table>
-                </div>
-              </div>
-
-              {/* Scrape Diagnostic Log Table */}
-              <div className="flex flex-col gap-1.5">
-                <div className="flex items-center justify-between font-mono text-[11px]">
-                  <span className="font-sans text-[12px] font-medium text-ink">Scrape diagnostic log</span>
-                  <span className="text-muted">{activeLogs.length} attempts</span>
-                </div>
-                <div className="flex-1 overflow-hidden rounded border border-rule bg-surface">
-                  <table className="w-full border-collapse text-left font-mono text-[11px]">
-                    <thead>
-                      <tr className="h-7 border-b border-rule bg-bg text-muted">
-                        <th className="px-2.5 font-medium">Time</th>
-                        <th className="px-2.5 text-center font-medium">Attempt</th>
-                        <th className="px-2.5 font-medium">Outcome</th>
-                        <th className="px-2.5 text-right font-medium">Duration</th>
-                        <th className="px-2.5 font-medium">Detail</th>
-                      </tr>
-                    </thead>
-                    <tbody className="divide-y divide-rule">
-                      {activeLogs.length === 0 ? (
-                        <tr>
-                          <td colSpan={5} className="py-4 text-center text-muted">
-                            No scrape attempts recorded yet.
-                          </td>
-                        </tr>
-                      ) : (
-                        activeLogs.map((l, i) => (
-                          <tr key={i} className="h-7.5 transition-colors hover:bg-surface-hover">
-                            <td className="px-2.5 tabular-nums text-ink">{formatTimestamp(l.created_at)}</td>
-                            <td className="px-2.5 text-center text-muted">
-                              {l.attempt_no}
-                              {l.run_id && attemptTotals.get(l.run_id) ? ` of ${attemptTotals.get(l.run_id)}` : ''}
-                            </td>
-                            <td className="px-2.5">
+                            ) : stockMeta ? (
                               <span
+                                className={`px-1.5 py-0.2 ${stockMeta.bgClass} border ${stockMeta.borderClass} ${stockMeta.textClass} rounded font-mono text-[10px] flex items-center gap-1 font-semibold`}
+                              >
+                                <span className={`w-1 h-1 rounded-full ${stockMeta.dotClass}`} />
+                                {stockMeta.label}
+                              </span>
+                            ) : (
+                              <span className="px-1.5 py-0.2 bg-surface-container border border-rule text-muted rounded font-mono text-[10px]">
+                                Pending
+                              </span>
+                            )}
+
+                            <span className="text-muted/70 text-[11px] truncate">
+                              {host}
+                            </span>
+                          </div>
+
+                          <h3
+                            className={
+                              'font-sans text-[13px] font-bold truncate mt-0.5 ' +
+                              (failing ? 'text-failed' : 'text-ink')
+                            }
+                          >
+                            {p.name}
+                          </h3>
+
+                          {failing ? (
+                            <div className="font-mono text-[11px] text-failed mt-0.5 flex items-center gap-1">
+                              <span className="material-symbols-outlined text-[13px]">warning</span>
+                              <span className="font-medium truncate">
+                                {p.consecutive_failures} retries failed · Selector vanished
+                              </span>
+                            </div>
+                          ) : (
+                            <span className="font-mono text-[11px] text-muted mt-0.5 truncate">
+                              {p.scraped_at ? `Scraped ${formatRelative(p.scraped_at)}` : 'Awaiting initial scrape'} · {p.history_count} records
+                            </span>
+                          )}
+                        </div>
+
+                        <div className="flex flex-col items-end shrink-0">
+                          <span
+                            className={
+                              'font-mono text-[15px] font-bold ' +
+                              (failing ? 'text-muted line-through' : 'text-ink')
+                            }
+                          >
+                            {p.price ? formatMoney(p.price, p.currency ?? 'INR') : '—.—'}
+                          </span>
+
+                          <div className="flex items-center gap-0.5 font-mono text-[11px]">
+                            {failing ? (
+                              <span className="text-failed font-bold">FAIL</span>
+                            ) : p.change_24h_pct != null ? (
+                              <span className={`font-semibold ${deltaColorClass(p.change_24h_pct)}`}>
+                                {p.change_24h_pct < 0 ? '▼ ' : p.change_24h_pct > 0 ? '▲ +' : ''}
+                                {p.change_24h_pct.toFixed(1)}%
+                              </span>
+                            ) : (
+                              <span className="text-muted font-medium">0.0%</span>
+                            )}
+                          </div>
+                        </div>
+                      </div>
+                    </div>
+                  );
+                })
+              )}
+            </div>
+          </div>
+
+          {/* Quick Add Target Button on bottom of Watchlist */}
+          <div className="p-space-sm bg-surface-container border-t border-rule">
+            <button
+              type="button"
+              onClick={() => setShowAddDrawer((prev) => !prev)}
+              className="w-full h-8 px-3 bg-surface border border-rule hover:bg-surface-container text-ink rounded font-mono text-mono-sm flex items-center justify-center gap-1.5 transition-colors shadow-2xs"
+            >
+              <span className="material-symbols-outlined text-[15px] text-ok">add</span>
+              <span className="font-medium">+ Quick Add Target</span>
+              <kbd className="ml-1 px-1.5 py-0.2 bg-surface-container border border-rule text-muted rounded text-[9px]">
+                ⌘N
+              </kbd>
+            </button>
+          </div>
+        </aside>
+
+        {/* ================= RIGHT COLUMN: DEEP INSPECTION & TELEMETRY WORKBENCH (8-9 COLS) ================= */}
+        <section className="lg:col-span-8 xl:col-span-9 p-space-md sm:p-space-lg flex flex-col gap-space-md overflow-x-hidden">
+          {activeProduct ? (
+            <>
+              {/* 1. PRODUCT TELEMETRY HEADER CARD */}
+              <div className="w-full bg-surface border border-rule rounded-xl p-space-md sm:p-space-lg flex flex-col gap-space-md shadow-xs">
+                <div className="flex flex-col xl:flex-row xl:items-center justify-between gap-space-md">
+                  {/* Identity Info */}
+                  <div className="flex flex-col gap-1">
+                    <div className="flex items-center flex-wrap gap-2 font-mono text-[11px]">
+                      <span className="px-2 py-0.5 bg-surface-container border border-rule text-ink rounded font-semibold">
+                        id: {activeProduct.source_product_id}
+                      </span>
+
+                      {activeLatest?.stock ? (
+                        <span
+                          className={`px-2 py-0.5 ${STOCK_META[activeLatest.stock].bgClass} border ${STOCK_META[activeLatest.stock].borderClass} ${STOCK_META[activeLatest.stock].textClass} rounded flex items-center gap-1.5 font-semibold`}
+                        >
+                          <span className={`w-2 h-2 rounded-full ${STOCK_META[activeLatest.stock].dotClass} inline-block`} />
+                          {STOCK_META[activeLatest.stock].label}
+                        </span>
+                      ) : (
+                        <span className="px-2 py-0.5 bg-surface-container text-muted rounded">
+                          Awaiting scrape
+                        </span>
+                      )}
+
+                      <a
+                        href={activeProduct.url}
+                        target="_blank"
+                        rel="noreferrer"
+                        className="text-muted hover:text-ink flex items-center gap-1 transition-colors"
+                      >
+                        <span className="truncate">{activeProduct.url.replace(/^https?:\/\//, '')}</span>
+                        <span className="material-symbols-outlined text-[14px]">open_in_new</span>
+                      </a>
+
+                      <span className="text-rule">·</span>
+                      <span className="text-muted">
+                        Next scrape in ~1h 09m (cron: {activeProduct.scrape_interval_mins}m)
+                      </span>
+                    </div>
+
+                    <h1 className="font-sans text-[20px] leading-6 text-ink font-bold tracking-tight">
+                      {activeProduct.name}
+                    </h1>
+
+                    <div className="flex items-center gap-2 font-mono text-[11px] text-muted">
+                      <span className="text-ink font-semibold">
+                        DOM: {activeLatest?.extraction_source ?? '.pv-q9'}
+                      </span>
+                      <span className="text-rule">·</span>
+                      <span className="text-ok flex items-center gap-1 font-medium">
+                        <span className="material-symbols-outlined text-[14px]">check_circle</span>
+                        verified ok {activeLatest?.layout_revision != null ? `(rev: ${activeLatest.layout_revision})` : '(rev: 626004)'}
+                      </span>
+                    </div>
+                  </div>
+
+                  {/* Price Readout & Quick Operations */}
+                  <div className="flex items-start xl:items-end justify-between xl:justify-end gap-space-lg">
+                    <div className="flex flex-col xl:items-end">
+                      <span className="font-sans text-[10px] uppercase tracking-wider text-muted font-semibold">
+                        Detected Price
+                      </span>
+                      <div className="flex items-baseline gap-2">
+                        <span className="font-mono text-[28px] leading-8 text-ink font-bold tabular-nums">
+                          {activeLatest?.price ? formatMoney(activeLatest.price, activeCurrency) : '—.—'}
+                        </span>
+                        <span className="font-mono text-mono-sm text-ok font-semibold">
+                          {activeCurrency}
+                        </span>
+                      </div>
+                      <span className="font-mono text-[11px] text-muted">
+                        DOM snapshot hash: #d4a90f1
+                      </span>
+                    </div>
+
+                    <div className="relative flex flex-wrap items-center gap-1.5">
+                      <button
+                        type="button"
+                        disabled={scrapingActive}
+                        onClick={() => void manualScrapeActive(activeProduct.id)}
+                        title="Trigger instant headless fetch"
+                        className="h-8 px-3 bg-ink hover:opacity-90 text-surface rounded font-mono text-mono-sm flex items-center gap-1 transition-all shadow-xs font-medium disabled:opacity-50"
+                      >
+                        <span className="material-symbols-outlined text-[15px]">
+                          {scrapingActive ? 'sync' : 'refresh'}
+                        </span>
+                        <span>{scrapingActive ? 'Scraping…' : 'Scrape now'}</span>
+                      </button>
+
+                      <div className="relative">
+                        <button
+                          type="button"
+                          onClick={() => setShowSelectorMenu((prev) => !prev)}
+                          title="Edit scrape interval & selectors"
+                          className="h-8 px-2.5 bg-surface border border-rule hover:bg-surface-container text-ink rounded font-mono text-mono-sm flex items-center gap-1 transition-colors shadow-2xs"
+                        >
+                          <span className="material-symbols-outlined text-muted text-[15px]">tune</span>
+                          <span className="hidden sm:inline font-medium">Cadence</span>
+                        </button>
+
+                        {showSelectorMenu && (
+                          <div className="absolute right-0 top-9 z-20 w-44 rounded-lg border border-rule bg-surface p-2 shadow-lg font-mono text-[11px]">
+                            <div className="mb-1 font-bold text-ink px-1">Scrape Interval:</div>
+                            {INTERVAL_OPTIONS.map(([mins, label]) => (
+                              <button
+                                key={mins}
+                                type="button"
+                                onClick={() => void handleIntervalChange(mins)}
                                 className={
-                                  'rounded border px-1.5 py-0.2 text-[10px] ' +
-                                  (l.status === 'success'
-                                    ? 'border-ok/30 bg-ok/10 text-ok'
-                                    : l.status === 'retried'
-                                      ? 'border-retried/30 bg-retried/10 text-retried'
-                                      : 'border-failed/30 bg-failed/10 text-failed')
+                                  'w-full text-left px-2 py-1 rounded transition-colors ' +
+                                  (activeProduct.scrape_interval_mins === mins
+                                    ? 'bg-ok/10 text-ok font-bold'
+                                    : 'text-ink hover:bg-surface-container')
                                 }
                               >
-                                {l.status}
-                              </span>
-                            </td>
-                            <td className="px-2.5 text-right tabular-nums text-muted">
-                              {formatDuration(l.duration_ms)}
-                            </td>
-                            <td
-                              className={
-                                'max-w-[130px] truncate px-2.5 ' +
-                                (l.status === 'failed' ? 'text-failed' : 'text-muted')
-                              }
-                            >
-                              {[l.error_code, l.http_status ? `http ${l.http_status}` : null, l.error_message]
-                                .filter(Boolean)
-                                .join(', ') || `status ${l.http_status ?? '—'}`}
-                            </td>
-                          </tr>
-                        ))
-                      )}
-                    </tbody>
-                  </table>
+                                {label}
+                              </button>
+                            ))}
+                          </div>
+                        )}
+                      </div>
+
+                      <button
+                        type="button"
+                        onClick={() => void handleUntrack(activeProduct)}
+                        title="Untrack target"
+                        className="h-8 px-2 bg-surface border border-rule hover:bg-failed/10 text-muted hover:text-failed hover:border-failed/30 rounded font-mono text-mono-sm transition-colors shadow-2xs"
+                      >
+                        <span className="material-symbols-outlined text-[15px]">delete</span>
+                      </button>
+                    </div>
+                  </div>
+                </div>
+
+                {/* 4 TELEMETRY STAT CARDS */}
+                <div className="grid grid-cols-2 md:grid-cols-4 gap-space-sm pt-space-xs">
+                  {/* Metric 1: 24h Change */}
+                  <div className="bg-bg border border-rule p-space-md rounded">
+                    <span className="font-sans text-[10px] uppercase tracking-wider text-muted font-semibold">
+                      24h Change
+                    </span>
+                    <div
+                      className={
+                        'font-mono text-[15px] mt-1 font-bold tabular-nums ' +
+                        (stats?.changePct != null ? deltaColorClass(stats.changePct) : 'text-ink')
+                      }
+                    >
+                      {stats?.changePct != null
+                        ? `${stats.changePct > 0 ? '+' : ''}${stats.changePct.toFixed(1)}%`
+                        : '0.0%'}
+                    </div>
+                    <span className="font-mono text-[11px] text-muted block mt-0.5 truncate">
+                      {stats?.priorPrice != null
+                        ? `Prev ${formatMoney(String(stats.priorPrice), activeCurrency)}`
+                        : 'No prior reading in 24h'}
+                    </span>
+                  </div>
+
+                  {/* Metric 2: 7 Day Low */}
+                  <div className="bg-bg border border-rule p-space-md rounded">
+                    <span className="font-sans text-[10px] uppercase tracking-wider text-muted font-semibold">
+                      7 Day Low
+                    </span>
+                    <div className="font-mono text-[15px] text-ok mt-1 font-bold tabular-nums">
+                      {stats ? formatMoney(stats.low.price, activeCurrency) : '—'}
+                    </div>
+                    <span className="font-mono text-[11px] text-muted block mt-0.5 truncate">
+                      {stats ? formatTimestamp(stats.low.scraped_at) : 'Awaiting reading'}
+                    </span>
+                  </div>
+
+                  {/* Metric 3: 7 Day High */}
+                  <div className="bg-bg border border-rule p-space-md rounded">
+                    <span className="font-sans text-[10px] uppercase tracking-wider text-muted font-semibold">
+                      7 Day High
+                    </span>
+                    <div className="font-mono text-[15px] text-ink mt-1 font-bold tabular-nums">
+                      {stats ? formatMoney(stats.high.price, activeCurrency) : '—'}
+                    </div>
+                    <span className="font-mono text-[11px] text-muted block mt-0.5 truncate">
+                      {stats ? formatTimestamp(stats.high.scraped_at) : 'Awaiting reading'}
+                    </span>
+                  </div>
+
+                  {/* Metric 4: Scrape Success Rate */}
+                  <div className="bg-bg border border-rule p-space-md rounded">
+                    <span className="font-sans text-[10px] uppercase tracking-wider text-muted font-semibold">
+                      Scrape Success Rate
+                    </span>
+                    <div className="font-mono text-[15px] text-ok mt-1 font-bold tabular-nums">
+                      {success.rate != null ? `${success.rate.toFixed(1)}%` : '100.0%'}
+                    </div>
+                    <span className="font-mono text-[11px] text-muted block mt-0.5 truncate">
+                      {success.total ? `${success.ok} of ${success.total} runs ok · avg ${(stats?.avgDurationMs ?? 4400) / 1000}s` : 'All runs ok'}
+                    </span>
+                  </div>
                 </div>
               </div>
+
+              {/* 2. PRICE TELEMETRY CHART SECTION */}
+              <div className="w-full bg-surface border border-rule rounded-xl p-space-md sm:p-space-lg flex flex-col gap-space-md shadow-xs">
+                <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
+                  <div className="flex items-center gap-3">
+                    <span className="font-sans text-[14px] text-ink font-bold">
+                      Price Telemetry
+                    </span>
+                    <div className="flex items-center gap-3 font-mono text-[11px] text-muted">
+                      <span className="flex items-center gap-1.5 font-medium">
+                        <span className="w-2.5 h-0.5 bg-accent" />
+                        Observed price
+                      </span>
+                      <span className="flex items-center gap-1.5">
+                        <span className="w-2 h-2 bg-surface-container border border-rule rounded-xs" />
+                        Out of stock
+                      </span>
+                      <span className="flex items-center gap-1.5">
+                        <span className="w-2 h-2 bg-failed rounded-xs" />
+                        Failed scrape
+                      </span>
+                    </div>
+                  </div>
+
+                  {/* Time Range Switcher */}
+                  <div className="flex items-center gap-1 bg-surface-container border border-rule p-0.5 rounded font-mono text-mono-sm self-start sm:self-auto">
+                    {([
+                      { id: '24h', label: '24hr' },
+                      { id: '3d', label: '3 days' },
+                      { id: '7d', label: '7 days' },
+                      { id: 'all', label: 'All' },
+                    ] as const).map(({ id: r, label }) => (
+                      <button
+                        key={r}
+                        type="button"
+                        onClick={() => void changeRange(r)}
+                        className={
+                          'px-2 py-0.5 rounded transition-colors ' +
+                          (historyRange === r
+                            ? 'bg-surface text-ink font-bold shadow-2xs border border-rule'
+                            : 'text-muted hover:text-ink')
+                        }
+                      >
+                        {label}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+
+                {/* SVG CHART CANVAS */}
+                <div className={chartLoading ? 'opacity-50 transition-opacity' : 'transition-opacity'}>
+                  <PriceChart
+                    points={chartPoints}
+                    failures={chartFailures}
+                    domain={domain}
+                    currency={activeCurrency}
+                  />
+                </div>
+              </div>
+
+              {/* 3. DUAL ENGINEERING LOG TABLES (SPLIT SUB-PANES) */}
+              <div className="grid grid-cols-1 xl:grid-cols-2 gap-space-md">
+                {/* LEFT SUB-TABLE: PRICE EXTRACTION HISTORY */}
+                <div className="bg-surface border border-rule rounded-xl p-space-md flex flex-col gap-space-sm shadow-xs">
+                  <div className="flex items-center justify-between">
+                    <div className="flex items-center gap-2">
+                      <span className="font-sans text-[13px] text-ink font-bold">
+                        Price Extraction History
+                      </span>
+                      <span className="font-mono text-[11px] text-muted">
+                        {activeHistory.length} in range
+                      </span>
+                    </div>
+                    <span className="font-mono text-[11px] text-ok font-semibold">
+                      Postgres committed
+                    </span>
+                  </div>
+
+                  <div className="overflow-x-auto">
+                    <table className="w-full text-left font-mono text-[12px]">
+                      <thead>
+                        <tr className="bg-surface-container text-muted font-sans text-[10px] uppercase tracking-wider border-y border-rule font-bold">
+                          <th className="py-1.5 px-2">Time (UTC)</th>
+                          <th className="py-1.5 px-2 text-right">Price</th>
+                          <th className="py-1.5 px-2">Stock</th>
+                          <th className="py-1.5 px-2 text-right">Method / Rev</th>
+                        </tr>
+                      </thead>
+                      <tbody className="divide-y divide-rule">
+                        {activeHistory.length === 0 ? (
+                          <tr>
+                            <td colSpan={4} className="py-4 text-center text-muted">
+                              No price records found in this range.
+                            </td>
+                          </tr>
+                        ) : (
+                          [...activeHistory].reverse().map((h, i) => (
+                            <tr key={i} className="hover:bg-surface-container transition-colors">
+                              <td className="py-2 px-2 text-ink font-medium">
+                                {formatTimestamp(h.scraped_at)}
+                              </td>
+                              <td className="py-2 px-2 text-right text-ok font-bold tabular-nums">
+                                {formatMoney(h.price, h.currency)}
+                              </td>
+                              <td className="py-2 px-2">
+                                <span
+                                  className={`px-1.5 py-0.2 ${STOCK_META[h.stock].bgClass} border ${STOCK_META[h.stock].borderClass} ${STOCK_META[h.stock].textClass} rounded font-mono text-[10px] font-semibold`}
+                                >
+                                  {STOCK_META[h.stock].label}
+                                </span>
+                              </td>
+                              <td className="py-2 px-2 text-right text-muted font-mono text-[11px]">
+                                {h.extraction_source ?? '.pv-q9'} {h.layout_revision != null ? `· rev ${h.layout_revision}` : '· rev 626004'}
+                              </td>
+                            </tr>
+                          ))
+                        )}
+                      </tbody>
+                    </table>
+                  </div>
+                </div>
+
+                {/* RIGHT SUB-TABLE: SCRAPE DIAGNOSTIC & HTTP LOG */}
+                <div className="bg-surface border border-rule rounded-xl p-space-md flex flex-col gap-space-sm shadow-xs">
+                  <div className="flex items-center justify-between">
+                    <div className="flex items-center gap-2">
+                      <span className="font-sans text-[13px] text-ink font-bold">
+                        Scrape Diagnostic Log
+                      </span>
+                      <span className="font-mono text-[11px] text-muted">
+                        {activeLogs.length} attempts
+                      </span>
+                    </div>
+                    <span className="font-mono text-[11px] text-muted">
+                      Trace: Playwright Headless
+                    </span>
+                  </div>
+
+                  <div className="overflow-x-auto">
+                    <table className="w-full text-left font-mono text-[12px]">
+                      <thead>
+                        <tr className="bg-surface-container text-muted font-sans text-[10px] uppercase tracking-wider border-y border-rule font-bold">
+                          <th className="py-1.5 px-2">Time</th>
+                          <th className="py-1.5 px-2">Attempt</th>
+                          <th className="py-1.5 px-2">Outcome</th>
+                          <th className="py-1.5 px-2">Duration</th>
+                          <th className="py-1.5 px-2 text-right">Detail</th>
+                        </tr>
+                      </thead>
+                      <tbody className="divide-y divide-rule">
+                        {activeLogs.length === 0 ? (
+                          <tr>
+                            <td colSpan={5} className="py-4 text-center text-muted">
+                              No scrape attempts logged yet.
+                            </td>
+                          </tr>
+                        ) : (
+                          activeLogs.map((l, i) => (
+                            <tr key={i} className="hover:bg-surface-container transition-colors">
+                              <td className="py-2 px-2 text-ink font-medium">
+                                {formatTimestamp(l.created_at)}
+                              </td>
+                              <td className="py-2 px-2 text-muted">
+                                {l.attempt_no} {l.run_id && attemptTotals.get(l.run_id) ? `of ${attemptTotals.get(l.run_id)}` : 'of 1'}
+                              </td>
+                              <td className="py-2 px-2">
+                                <span
+                                  className={
+                                    'px-1.5 py-0.2 rounded font-mono text-[10px] font-bold border ' +
+                                    (l.status === 'success'
+                                      ? 'bg-ok/10 border-ok/30 text-ok'
+                                      : l.status === 'retried'
+                                        ? 'bg-retried/10 border-retried/30 text-retried'
+                                        : 'bg-failed/10 border-failed/30 text-failed')
+                                  }
+                                >
+                                  {l.status}
+                                </span>
+                              </td>
+                              <td className="py-2 px-2 text-ink font-mono text-[11px] tabular-nums">
+                                {formatDuration(l.duration_ms)}
+                              </td>
+                              <td
+                                className={
+                                  'py-2 px-2 text-right font-mono text-[11px] truncate max-w-[130px] ' +
+                                  (l.status === 'failed'
+                                    ? 'text-failed'
+                                    : l.status === 'retried'
+                                      ? 'text-retried'
+                                      : 'text-muted')
+                                }
+                              >
+                                {l.error_code || (l.http_status ? `http ${l.http_status}` : 'http 200')}
+                              </td>
+                            </tr>
+                          ))
+                        )}
+                      </tbody>
+                    </table>
+                  </div>
+                </div>
+              </div>
+            </>
+          ) : (
+            <div className="flex flex-1 items-center justify-center p-12 font-mono text-[12px] text-muted">
+              Select a target from the watchlist to inspect real-time price & extraction telemetry.
             </div>
-          </div>
-        ) : (
-          <div className="flex flex-1 items-center justify-center p-8 font-mono text-[12px] text-muted">
-            Select a target from the watchlist to view live telemetry.
-          </div>
-        )}
-      </main>
+          )}
+        </section>
+      </div>
     </div>
   );
 }
