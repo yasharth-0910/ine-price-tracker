@@ -337,3 +337,15 @@ existing `store:*` rows — is left as a follow-up; the UI guard prevents the du
 `db/migrations/003_normalise_source_product_id.sql` strips the `store:` prefix (collision-guarded,
 leaves ambiguous rows for manual merge), and the dual-match workaround was removed. Migration tested
 on `ine_local` including a rolled-back collision case; the operator runs it on Supabase.
+
+## [ui] Runs page threw unhandled TypeError on skipped_recent status
+**What it did:** `frontend/src/pages/Runs.tsx` indexed `OUTCOME[p.status]` directly where `OUTCOME` only defined `success`, `retried`, and `failed`.
+**Why it was wrong:** scheduled runs log `skipped_recent` when a product was scraped recently. Expanding a run row with this status attempted to read `OUTCOME['skipped_recent'].text`, throwing an unhandled TypeError that crashed the React tree into a blank/black screen.
+**How it was caught:** user clicked the topmost scheduled run in `/runs` and reported a black screen crash.
+**Fix:** added `skipped_recent`, `timed_out`, and `errored` entries to `OUTCOME` and added a safe `getOutcome(status)` fallback.
+
+## [ui] PriceChart crosshair/cursor desync on wide containers
+**What it did:** calculated SVG viewBox X via `((clientX - rect.left) / rect.width) * W`.
+**Why it was wrong:** SVG defaulted to `preserveAspectRatio="xMidYMid meet"`, which letterboxes horizontally on wide containers, making `rect.left` and `rect.width` out of sync with the rendered viewBox geometry.
+**How it was caught:** crosshair cursor was visibly misaligned with the price points and vertical indicator on the right of the timeline.
+**Fix:** added `preserveAspectRatio="none"` and computed exact viewBox coordinates using `createSVGPoint().matrixTransform(svg.getScreenCTM().inverse())`. Also added vibrant emerald gradient line styling and constrained product detail/runs pages with `max-w-6xl mx-auto`.

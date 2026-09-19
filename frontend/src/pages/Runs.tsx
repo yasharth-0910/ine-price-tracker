@@ -1,17 +1,24 @@
 import { useCallback, useEffect, useState } from 'react';
 import { Link } from 'react-router-dom';
-import { api, type Run, type RunProduct, type ScrapeStatus } from '../lib/api';
+import { api, type Run, type RunProduct } from '../lib/api';
 import { formatDuration, formatTimestamp } from '../lib/format';
 
 // Where a reviewer confirms the scraper keeps working across many unattended runs. Each row shows
 // when it ran, how long it took, its trigger, the ok/failed/skipped split, and the slowest attempt
 // (the timeout-headroom gauge). Expanding a row shows the per-product outcome for that run.
 
-const OUTCOME: Record<ScrapeStatus, { block: string; text: string }> = {
+const OUTCOME: Record<string, { block: string; text: string }> = {
   success: { block: 'bg-ok', text: 'text-ok' },
   retried: { block: 'bg-retried', text: 'text-retried' },
   failed: { block: 'bg-failed', text: 'text-failed' },
+  skipped_recent: { block: 'bg-muted', text: 'text-muted' },
+  timed_out: { block: 'bg-failed', text: 'text-failed' },
+  errored: { block: 'bg-failed', text: 'text-failed' },
 };
+
+function getOutcome(status: string) {
+  return OUTCOME[status] ?? { block: 'bg-muted', text: 'text-muted' };
+}
 
 function durationOf(run: Run): string {
   if (!run.finished_at) return 'running…';
@@ -73,7 +80,7 @@ export function Runs() {
     );
 
   return (
-    <div className="flex flex-col gap-4">
+    <div className="mx-auto flex w-full max-w-6xl flex-col gap-4">
       <div className="overflow-hidden rounded border border-rule bg-surface">
         <div className="flex items-center justify-between border-b border-rule bg-bg px-4 py-2.5 font-sans text-[13px]">
           <span className="font-medium text-ink">Recent scrape runs</span>
@@ -149,23 +156,26 @@ function RunRow({ run }: { run: Run }) {
             ) : detail.length === 0 ? (
               <span className="text-muted">No product attempts recorded in this run.</span>
             ) : (
-              <ul className="flex flex-col gap-1">
-                {detail.map((p) => (
-                  <li key={p.product_id} className="flex flex-wrap items-center gap-space-md">
-                    <span className={'inline-flex w-24 shrink-0 items-center gap-1.5 font-medium ' + OUTCOME[p.status].text}>
-                      <span className={'inline-block h-2 w-2 rounded-sm ' + OUTCOME[p.status].block} />
-                      {p.status}
-                    </span>
-                    <Link to={`/product/${p.product_id}`} className="text-ink hover:underline">
-                      {p.name}
-                    </Link>
-                    <span className="text-muted">
-                      attempt {p.attempts} · {formatDuration(p.duration_ms)}
-                      {p.error_code && ` · ${p.error_code}`}
-                      {p.http_status != null && ` · http ${p.http_status}`}
-                    </span>
-                  </li>
-                ))}
+              <ul className="flex flex-col gap-1.5">
+                {detail.map((p) => {
+                  const outcome = getOutcome(p.status);
+                  return (
+                    <li key={p.product_id} className="flex flex-wrap items-center gap-space-md">
+                      <span className={'inline-flex w-28 shrink-0 items-center gap-1.5 font-medium ' + outcome.text}>
+                        <span className={'inline-block h-2 w-2 rounded-sm ' + outcome.block} />
+                        {p.status}
+                      </span>
+                      <Link to={`/product/${p.product_id}`} className="text-ink hover:underline">
+                        {p.name}
+                      </Link>
+                      <span className="text-muted">
+                        attempt {p.attempts} · {formatDuration(p.duration_ms)}
+                        {p.error_code && ` · ${p.error_code}`}
+                        {p.http_status != null && ` · http ${p.http_status}`}
+                      </span>
+                    </li>
+                  );
+                })}
               </ul>
             )}
           </td>

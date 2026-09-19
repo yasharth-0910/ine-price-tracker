@@ -155,8 +155,16 @@ export function PriceChart({
   }
 
   function toVbX(e: React.MouseEvent<SVGSVGElement>): number {
-    const rect = e.currentTarget.getBoundingClientRect();
-    return ((e.clientX - rect.left) / rect.width) * W;
+    const svg = e.currentTarget;
+    const pt = svg.createSVGPoint();
+    pt.x = e.clientX;
+    pt.y = e.clientY;
+    const ctm = svg.getScreenCTM();
+    if (!ctm) {
+      const rect = svg.getBoundingClientRect();
+      return ((e.clientX - rect.left) / rect.width) * W;
+    }
+    return pt.matrixTransform(ctm.inverse()).x;
   }
 
   function onMove(e: React.MouseEvent<SVGSVGElement>) {
@@ -192,6 +200,7 @@ export function PriceChart({
       <div className="relative min-w-[720px]">
         <svg
           viewBox={`0 0 ${W} ${H}`}
+          preserveAspectRatio="none"
           className="block h-72 w-full cursor-crosshair select-none font-mono"
           style={{ shapeRendering: 'geometricPrecision' }}
           onMouseMove={onMove}
@@ -201,6 +210,14 @@ export function PriceChart({
           }}
           onClick={onClick}
         >
+          <defs>
+            <linearGradient id="priceAreaGrad" x1="0" y1="0" x2="0" y2="1">
+              <stop offset="0%" stopColor="#10b981" stopOpacity="0.25" />
+              <stop offset="70%" stopColor="#10b981" stopOpacity="0.04" />
+              <stop offset="100%" stopColor="#10b981" stopOpacity="0.0" />
+            </linearGradient>
+          </defs>
+
           {bands.map(([a, b], i) => (
             <rect
               key={`band-${i}`}
@@ -229,37 +246,65 @@ export function PriceChart({
             </g>
           ))}
 
+          {/* Area gradient under price curve */}
+          {segments.map((s, i) => {
+            if (s.length < 2) return null;
+            const first = s[0]!;
+            const last = s[s.length - 1]!;
+            const polyPoints = [
+              `${sx(first.t)},${PLOT.y1}`,
+              ...s.map((p) => `${sx(p.t)},${sy(p.price)}`),
+              `${sx(last.t)},${PLOT.y1}`,
+            ].join(' ');
+            return <polygon key={`area-${i}`} points={polyPoints} fill="url(#priceAreaGrad)" />;
+          })}
+
+          {/* Colorful Emerald Price Polyline */}
           {segments.map((s, i) =>
             s.length >= 2 ? (
               <polyline
                 key={`seg-${i}`}
                 fill="none"
-                stroke="var(--ink)"
-                strokeWidth={1.5}
+                stroke="#10b981"
+                strokeWidth={2}
                 strokeLinecap="round"
                 strokeLinejoin="round"
                 points={s.map((p) => `${sx(p.t)},${sy(p.price)}`).join(' ')}
               />
             ) : null,
           )}
+
+          {/* Data Points */}
           {sorted.map((p, i) => (
-            <circle key={`pt-${i}`} cx={sx(p.t)} cy={sy(p.price)} r={2} fill="var(--ink)" />
+            <circle
+              key={`pt-${i}`}
+              cx={sx(p.t)}
+              cy={sy(p.price)}
+              r={2.5}
+              fill="#10b981"
+              stroke="var(--surface)"
+              strokeWidth={1}
+            />
           ))}
 
           {/* Anchor marker: solid guide + ringed dot */}
           {anchor && (
             <g>
-              <line x1={sx(anchor.t)} x2={sx(anchor.t)} y1={PLOT.y0} y2={PLOT.y1} stroke="var(--muted)" strokeOpacity={0.6} />
-              <circle cx={sx(anchor.t)} cy={sy(anchor.price)} r={4} fill="var(--ink)" stroke="var(--surface)" strokeWidth={1.5} />
+              <line x1={sx(anchor.t)} x2={sx(anchor.t)} y1={PLOT.y0} y2={PLOT.y1} stroke="#eab308" strokeOpacity={0.7} strokeDasharray="3 3" />
+              <circle cx={sx(anchor.t)} cy={sy(anchor.price)} r={7} fill="#eab308" fillOpacity={0.25} />
+              <circle cx={sx(anchor.t)} cy={sy(anchor.price)} r={4} fill="#eab308" stroke="var(--surface)" strokeWidth={1.5} />
             </g>
           )}
 
           {/* Hover crosshair follows the cursor; dot only when snapped to a point */}
           {cursorX != null && cursorX >= PLOT.x0 && cursorX <= PLOT.x1 && (
-            <line x1={cursorX} x2={cursorX} y1={PLOT.y0} y2={PLOT.y1} stroke="var(--muted)" strokeDasharray="2 2" />
+            <line x1={cursorX} x2={cursorX} y1={PLOT.y0} y2={PLOT.y1} stroke="var(--muted)" strokeOpacity={0.6} strokeDasharray="2 2" />
           )}
           {hover?.kind === 'point' && (
-            <circle cx={sx(hover.p.t)} cy={sy(hover.p.price)} r={3.5} fill="var(--surface)" stroke="var(--ink)" strokeWidth={1.5} />
+            <g>
+              <circle cx={sx(hover.p.t)} cy={sy(hover.p.price)} r={7} fill="#10b981" fillOpacity={0.25} />
+              <circle cx={sx(hover.p.t)} cy={sy(hover.p.price)} r={3.5} fill="#10b981" stroke="#ffffff" strokeWidth={1.5} />
+            </g>
           )}
 
           <line x1={PLOT.x0} x2={PLOT.x1} y1={PLOT.y1} y2={PLOT.y1} stroke="var(--rule)" />
