@@ -1,5 +1,5 @@
 import type { Run } from '../lib/api';
-import { formatDuration, formatTimestamp } from '../lib/format';
+import { formatTimestamp } from '../lib/format';
 
 // One block per 2-hour scrape window over the past three days (36 windows), coloured by the run
 // that landed in it. Windows with no run are hollow outlines. Everything here is derived from real
@@ -33,7 +33,7 @@ export function RunStrip({
   runs,
   productCount,
   nextRun,
-  lastRunMs,
+  lastRunMs: _lastRunMs,
 }: {
   runs: Run[];
   productCount: number;
@@ -54,26 +54,44 @@ export function RunStrip({
     return { start, run: byWindow.get(start) };
   });
 
+  let okCount = 0;
+  let partialCount = 0;
+  let failedCount = 0;
+  let emptyCount = 0;
+
+  for (const { run } of windows) {
+    if (!run) {
+      emptyCount++;
+    } else {
+      const outcome = runOutcome(run);
+      if (outcome === 'ok') okCount++;
+      else if (outcome === 'partial') partialCount++;
+      else if (outcome === 'failed') failedCount++;
+    }
+  }
+
+  const nextRunLabel = nextRun
+    ? `Next run ${formatTimestamp(nextRun.toISOString())}`
+    : 'Next run pending';
+
   return (
-    <section className="border-b border-rule bg-surface px-space-lg py-space-md">
-      <div className="mb-space-sm flex items-center justify-between">
-        <span className="text-body-md font-medium text-ink">Scrape execution history</span>
-        <span className="font-mono text-body-sm tabular-nums text-muted">
-          Past 72 hours (2h windows)
-        </span>
+    <section className="flex flex-col space-y-2.5 rounded border border-rule bg-surface p-3">
+      <div className="flex items-center justify-between text-[13px]">
+        <span className="font-medium text-ink">Scrape history (last 72 hours)</span>
+        <span className="font-mono text-muted">2-hour execution windows</span>
       </div>
 
-      <div className="grid grid-cols-12 gap-[3px] py-1 sm:grid-cols-18 md:grid-cols-36">
+      <div className="grid w-full grid-cols-12 gap-1 pt-1 sm:grid-cols-18 md:grid-cols-36">
         {windows.map(({ start, run }) => {
           const title = run
             ? `${formatTimestamp(run.started_at)} — ${run.succeeded} ok, ${run.failed} failed`
-            : `${formatTimestamp(new Date(start).toISOString())} — no run recorded`;
+            : `${formatTimestamp(new Date(start).toISOString())} — pending / no run`;
           return (
             <div
               key={start}
               title={title}
               className={
-                'h-5 rounded-sm ' +
+                'h-6 rounded-[2px] transition-opacity hover:opacity-80 ' +
                 (run ? FILL[runOutcome(run)] : 'border border-rule bg-transparent')
               }
             />
@@ -81,29 +99,29 @@ export function RunStrip({
         })}
       </div>
 
-      <div className="mt-space-sm flex flex-col gap-space-xs pt-1 font-mono text-mono-sm text-muted sm:flex-row sm:items-center sm:justify-between">
-        <span className="tabular-nums">
-          {nextRun ? `Next run ${formatTimestamp(nextRun.toISOString())}` : 'Next run pending'}
-          {' · '}
-          {productCount} {productCount === 1 ? 'product' : 'products'}
-          {lastRunMs != null && ` · last run ${formatDuration(lastRunMs)}`}
+      <div className="flex flex-col gap-2 pt-1 sm:flex-row sm:items-center sm:justify-between">
+        <span className="font-mono text-[13px] tabular-nums text-muted">
+          {nextRunLabel}, {productCount} {productCount === 1 ? 'product' : 'products'}
         </span>
-        <div className="flex flex-wrap items-center gap-space-md">
-          <Legend className="bg-ok" label="Completed" />
-          <Legend className="bg-retried" label="Partial" />
-          <Legend className="bg-failed" label="Failed" />
-          <Legend className="border border-rule" label="No run" />
+        <div className="flex flex-wrap items-center gap-3 font-mono text-[11px] text-muted">
+          <div className="flex items-center gap-1.5">
+            <span className="h-2 w-2 rounded-[1px] bg-ok" />
+            <span>{okCount} successful</span>
+          </div>
+          <div className="flex items-center gap-1.5">
+            <span className="h-2 w-2 rounded-[1px] bg-retried" />
+            <span>{partialCount} retried</span>
+          </div>
+          <div className="flex items-center gap-1.5">
+            <span className="h-2 w-2 rounded-[1px] bg-failed" />
+            <span>{failedCount} error</span>
+          </div>
+          <div className="flex items-center gap-1.5">
+            <span className="h-2 w-2 rounded-[1px] border border-rule" />
+            <span>{emptyCount} queued</span>
+          </div>
         </div>
       </div>
     </section>
-  );
-}
-
-function Legend({ className, label }: { className: string; label: string }) {
-  return (
-    <span className="inline-flex items-center gap-1.5">
-      <span className={'h-2 w-2 rounded-sm ' + className} />
-      {label}
-    </span>
   );
 }

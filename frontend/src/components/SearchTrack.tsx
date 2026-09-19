@@ -59,44 +59,56 @@ export function SearchTrack({
   }
 
   return (
-    <section className="border-b border-rule bg-surface px-space-lg py-space-md">
-      <input
-        type="text"
-        value={input}
-        onChange={(e) => setInput(e.target.value)}
-        placeholder="Search the store to track a product"
-        aria-label="Search the store to track a product"
-        className="h-8 w-full rounded border border-rule bg-bg px-3 font-sans text-body-sm text-ink placeholder:text-muted focus:border-ink focus:outline-none"
-      />
+    <section className="space-y-2.5 rounded border border-rule bg-surface p-3">
+      <form
+        onSubmit={(e) => e.preventDefault()}
+        className="flex flex-col items-stretch gap-2 sm:flex-row"
+      >
+        <div className="relative flex-1">
+          <input
+            type="text"
+            value={input}
+            onChange={(e) => setInput(e.target.value)}
+            placeholder="Search the store to track a product"
+            aria-label="Search the store to track a product"
+            className="h-8 w-full rounded border border-rule bg-bg px-3 font-sans text-[13px] text-ink placeholder:text-muted focus:border-muted focus:outline-none"
+          />
+        </div>
+        <button
+          type="submit"
+          className="h-8 shrink-0 rounded border border-rule bg-surface px-4 font-sans text-[13px] font-medium text-ink transition-colors hover:border-muted hover:bg-surface-hover"
+        >
+          Track
+        </button>
+      </form>
 
-      {trackError && <div className="mt-space-sm font-mono text-mono-sm text-failed">{trackError}</div>}
+      {trackError && <div className="px-1 font-mono text-[11px] text-failed">{trackError}</div>}
 
       {state.status === 'loading' && (
-        <div className="mt-space-sm animate-pulse font-mono text-mono-sm text-muted">Searching…</div>
+        <div className="animate-pulse px-1 font-mono text-[11px] text-muted">Searching store catalogue…</div>
       )}
       {state.status === 'error' && (
-        <div className="mt-space-sm rounded border border-failed px-space-md py-space-sm font-mono text-mono-sm text-failed">
+        <div className="rounded border border-failed px-3 py-2 font-mono text-[11px] text-failed">
           Search failed — {state.message}
         </div>
       )}
       {state.status === 'done' && state.items.length === 0 && (
-        <div className="mt-space-sm font-mono text-mono-sm text-muted">
-          No products matched. Try a shorter query.
+        <div className="flex items-center gap-1.5 px-1 font-sans text-[12px] text-muted">
+          <span>No products matched. Try a shorter query.</span>
         </div>
       )}
       {state.status === 'done' && state.items.length > 0 && (
-        <ul className="mt-space-sm divide-y divide-rule rounded border border-rule">
+        <ul className="divide-y divide-rule rounded border border-rule bg-bg">
           {state.items.map((item) => {
-            // source_product_id is normalised to the bare store id (migration 003), so a direct match.
             const tracked = trackedStoreIds.has(String(item.id));
             return (
               <li
                 key={item.id}
-                className="flex items-center justify-between gap-space-md px-space-md py-space-sm"
+                className="flex items-center justify-between gap-space-md px-3 py-2"
               >
                 <div className="min-w-0">
-                  <div className="truncate text-body-sm font-medium text-ink">{item.name}</div>
-                  <div className="truncate font-mono text-mono-sm text-muted">
+                  <div className="truncate font-sans text-[13px] font-medium text-ink">{item.name}</div>
+                  <div className="truncate font-mono text-[11px] text-muted">
                     {[item.brand, item.category, item.sku && `SKU ${item.sku}`].filter(Boolean).join(' · ') || '—'}
                   </div>
                 </div>
@@ -105,10 +117,10 @@ export function SearchTrack({
                   disabled={tracked || pendingId === item.id}
                   onClick={() => void track(item)}
                   className={
-                    'shrink-0 rounded border px-2.5 py-1 font-sans text-body-sm transition-colors ' +
+                    'h-7 shrink-0 rounded border px-3 font-sans text-[12px] font-medium transition-colors ' +
                     (tracked
-                      ? 'cursor-default border-rule text-muted'
-                      : 'border-rule text-ink hover:bg-surface-hover')
+                      ? 'cursor-default border-rule bg-surface text-muted'
+                      : 'border-rule bg-surface text-ink hover:border-muted hover:bg-surface-hover')
                   }
                 >
                   {tracked ? 'Tracking' : pendingId === item.id ? 'Tracking…' : 'Track'}

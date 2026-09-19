@@ -73,30 +73,32 @@ export function Runs() {
     );
 
   return (
-    <div className="p-space-lg">
-      <div className="mb-space-md flex items-baseline justify-between">
-        <h1 className="text-headline-sm font-semibold text-ink">Recent runs</h1>
-        <span className="font-mono text-mono-sm text-muted">{state.runs.length} most recent</span>
-      </div>
-      <div className="overflow-x-auto rounded border border-rule bg-surface">
-        <table className="w-full min-w-[720px] border-collapse text-left font-mono text-mono-sm">
-          <thead>
-            <tr className="h-8 border-b border-rule bg-bg text-muted">
-              <th className="px-space-md font-medium">Started</th>
-              <th className="px-space-md text-right font-medium">Duration</th>
-              <th className="px-space-md font-medium">Trigger</th>
-              <th className="px-space-md text-right font-medium">OK</th>
-              <th className="px-space-md text-right font-medium">Failed</th>
-              <th className="px-space-md text-right font-medium">Skipped</th>
-              <th className="px-space-md text-right font-medium">Slowest attempt</th>
-            </tr>
-          </thead>
-          <tbody className="divide-y divide-rule">
-            {state.runs.map((run) => (
-              <RunRow key={run.id} run={run} />
-            ))}
-          </tbody>
-        </table>
+    <div className="flex flex-col gap-4">
+      <div className="overflow-hidden rounded border border-rule bg-surface">
+        <div className="flex items-center justify-between border-b border-rule bg-bg px-4 py-2.5 font-sans text-[13px]">
+          <span className="font-medium text-ink">Recent scrape runs</span>
+          <span className="font-mono text-[11px] text-muted">{state.runs.length} most recent</span>
+        </div>
+        <div className="overflow-x-auto">
+          <table className="w-full min-w-[720px] border-collapse text-left font-mono text-[11px]">
+            <thead>
+              <tr className="h-7 border-b border-rule bg-bg text-muted">
+                <th className="px-3 font-medium">STARTED</th>
+                <th className="px-3 text-right font-medium">DURATION</th>
+                <th className="px-3 font-medium">TRIGGER</th>
+                <th className="px-3 text-right font-medium">OK</th>
+                <th className="px-3 text-right font-medium">FAILED</th>
+                <th className="px-3 text-right font-medium">SKIPPED</th>
+                <th className="px-3 text-right font-medium">SLOWEST ATTEMPT</th>
+              </tr>
+            </thead>
+            <tbody className="divide-y divide-rule">
+              {state.runs.map((run) => (
+                <RunRow key={run.id} run={run} />
+              ))}
+            </tbody>
+          </table>
+        </div>
       </div>
     </div>
   );

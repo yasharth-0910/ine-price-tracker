@@ -174,7 +174,7 @@ export function ProductDetail() {
   if (state.status === 'loading') return <Centered>Loading product…</Centered>;
   if (state.status === 'error') return <ErrorState message={state.message} onRetry={() => void load()} />;
 
-  const { product, latest, hist7d, logs, nextRun } = state.data;
+  const { product, latest, hist7d, logs } = state.data;
   const stats = computeStats(hist7d);
   const success = computeSuccess(logs);
   const attemptTotals = runAttemptTotals(logs);
@@ -212,82 +212,97 @@ export function ProductDetail() {
     }));
 
   return (
-    <div className="flex flex-col">
-      {/* Back link */}
-      <div className="border-b border-rule bg-surface px-space-lg py-space-sm">
-        <Link to="/" className="inline-flex items-center gap-1.5 font-mono text-mono-sm text-ink hover:underline">
-          ← Back to dashboard
-        </Link>
-      </div>
+    <div className="flex flex-col gap-4">
+      {/* Header Panel */}
+      <div className="flex flex-col justify-between gap-4 rounded border border-rule bg-surface p-4">
+        <div className="flex flex-col justify-between gap-3 sm:flex-row sm:items-center">
+          <Link
+            to="/"
+            className="inline-flex items-center gap-1.5 font-mono text-[12px] text-muted transition-colors hover:text-ink"
+          >
+            ← Back to dashboard
+          </Link>
+          <div className="font-mono text-[11px] text-muted">
+            <span className="inline-block h-1.5 w-1.5 rounded-full bg-ok mr-1.5" />
+            Target: {product.source_product_id} · {product.last_success_at ? `Last success ${formatTimestamp(product.last_success_at)}` : 'No successful scrape yet'}
+          </div>
+        </div>
 
-      {/* Header: name, price, stock, currency + actions (interval, untrack) */}
-      <div className="border-b border-rule bg-surface px-space-lg py-space-lg">
-        <div className="flex flex-col justify-between gap-space-md lg:flex-row lg:items-start">
+        <div className="flex flex-col justify-between gap-4 lg:flex-row lg:items-end">
           <div className="min-w-0">
+            <div className="flex flex-wrap items-center gap-2">
+              <h1 className="text-headline-lg font-semibold tracking-tight text-ink">{product.name}</h1>
+              <span className="rounded border border-rule bg-bg px-1.5 py-0.5 font-mono text-[11px] text-muted">
+                id: {product.source_product_id}
+              </span>
+            </div>
             <a
               href={product.url}
               target="_blank"
               rel="noreferrer"
-              className="font-mono text-mono-sm text-muted hover:underline"
+              className="mt-1 block truncate font-mono text-[12px] text-muted transition-colors hover:text-ink hover:underline"
             >
               {product.url.replace(/^https?:\/\//, '')}
             </a>
-            <h1 className="mt-1 text-headline-lg font-semibold tracking-tight text-ink">{product.name}</h1>
-            <div className="mt-2 flex flex-wrap items-baseline gap-space-md">
-              <span className="font-mono text-[30px] font-medium tabular-nums text-ink">
+          </div>
+
+          <div className="flex flex-wrap items-center gap-4">
+            <div className="flex items-baseline gap-3">
+              <span className="font-mono text-[32px] font-medium tabular-nums text-ink">
                 {latest ? formatMoney(latest.price, currency) : '—.—'}
               </span>
               <StockPill stock={latest?.stock ?? null} />
-              <span className="font-mono text-mono-sm text-muted">Currency: {currency}</span>
             </div>
-          </div>
-          <div className="flex shrink-0 flex-col items-end gap-space-sm">
-            <div className="flex flex-wrap items-center gap-space-md">
+
+            <div className="flex flex-wrap items-center gap-2">
               <IntervalSelect product={product} onSaved={applyInterval} />
               <button
                 type="button"
                 disabled={scraping}
                 onClick={() => void scrape(id)}
-                className="rounded border border-rule bg-bg px-space-md py-1 font-mono text-mono-sm text-ink transition-colors hover:bg-surface-hover disabled:opacity-60"
+                className="h-8 rounded border border-rule bg-surface px-3 font-sans text-[12px] font-medium text-ink transition-colors hover:border-muted hover:bg-surface-hover disabled:opacity-60"
               >
                 {scraping ? 'Scraping…' : 'Scrape now'}
               </button>
               <button
                 type="button"
                 onClick={() => void untrack()}
-                className="rounded border border-rule bg-bg px-space-md py-1 font-mono text-mono-sm text-ink transition-colors hover:border-failed hover:text-failed"
+                className="h-8 rounded border border-rule bg-surface px-3 font-sans text-[12px] font-medium text-ink transition-colors hover:border-failed hover:text-failed"
               >
                 Untrack
               </button>
             </div>
-            {scrapeError && (
-              <span className="font-mono text-mono-sm text-failed">Scrape failed: {scrapeError}</span>
-            )}
           </div>
         </div>
+
+        {scrapeError && (
+          <div className="rounded border border-failed px-3 py-1.5 font-mono text-[11px] text-failed">
+            Scrape error: {scrapeError}
+          </div>
+        )}
       </div>
 
-      {/* Four stat blocks split by vertical hairlines */}
-      <div className="grid grid-cols-1 border-b border-rule bg-surface sm:grid-cols-2 lg:grid-cols-4">
+      {/* Four Stat Blocks Panel */}
+      <div className="grid grid-cols-1 divide-y divide-rule rounded border border-rule bg-surface sm:grid-cols-2 sm:divide-y-0 sm:divide-x lg:grid-cols-4">
         <StatBlock
           label="24h change"
           value={stats?.changePct != null ? `${stats.changePct > 0 ? '+' : ''}${stats.changePct.toFixed(1)}%` : '—'}
           valueClass={
-            stats?.change == null ? 'text-ink' : stats.change > 0 ? 'text-failed' : stats.change < 0 ? 'text-ok' : 'text-ink'
+            stats?.change == null ? 'text-ink' : stats.change < 0 ? 'text-ok' : stats.change > 0 ? 'text-failed' : 'text-ink'
           }
           sub={
-            stats?.priorPrice != null ? `Prior reading ${formatMoney(String(stats.priorPrice), currency)}` : 'No 24h reading'
+            stats?.priorPrice != null ? `Prev reading ${formatMoney(String(stats.priorPrice), currency)}` : 'No prior reading in 24h'
           }
         />
         <StatBlock
           label="7 day low"
           value={stats ? formatMoney(stats.low.price, currency) : '—'}
-          sub={stats ? formatTimestamp(stats.low.scraped_at) : 'Awaiting first tick'}
+          sub={stats ? formatTimestamp(stats.low.scraped_at) : 'Awaiting first reading'}
         />
         <StatBlock
           label="7 day high"
           value={stats ? formatMoney(stats.high.price, currency) : '—'}
-          sub={stats ? formatTimestamp(stats.high.scraped_at) : 'Awaiting first tick'}
+          sub={stats ? formatTimestamp(stats.high.scraped_at) : 'Awaiting first reading'}
         />
         <StatBlock
           label="Scrape success rate"
@@ -297,22 +312,21 @@ export function ProductDetail() {
               ? `${success.ok} of ${success.total} runs ok · ${success.retriedOk} retried, ${success.failed} failed`
               : 'No attempts recorded'
           }
-          last
         />
       </div>
 
-      {/* Chart */}
-      <div className="flex flex-col gap-space-md border-b border-rule bg-surface p-space-lg">
-        <div className="flex flex-col gap-space-sm sm:flex-row sm:items-center sm:justify-between">
-          <div className="flex flex-wrap items-center gap-space-md">
-            <span className="text-headline-sm font-semibold text-ink">Recorded price curve</span>
-            <div className="flex flex-wrap items-center gap-space-md border-l border-rule pl-space-md font-mono text-mono-sm text-muted">
-              <Legend swatch={<span className="h-[1.5px] w-3 bg-ink" />} label="Observed price" />
+      {/* Chart Panel */}
+      <div className="flex flex-col gap-3 rounded border border-rule bg-surface p-4">
+        <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+          <div className="flex flex-wrap items-center gap-3">
+            <span className="font-sans text-[13px] font-medium text-ink">Price telemetry timeline</span>
+            <div className="flex flex-wrap items-center gap-3 border-l border-rule pl-3 font-mono text-[11px] text-muted">
+              <Legend swatch={<span className="h-0.5 w-3 bg-ink" />} label="Observed price" />
               <Legend swatch={<span className="h-2 w-2.5 bg-rule" />} label="Out of stock" />
-              <Legend swatch={<span className="h-1.5 w-1.5 bg-failed" />} label="Failed scrape (gap)" />
+              <Legend swatch={<span className="h-1.5 w-1.5 rounded-full bg-failed" />} label="Failed scrape" />
             </div>
           </div>
-          <div className="inline-flex self-start rounded border border-rule p-0.5 font-mono text-mono-sm sm:self-auto">
+          <div className="inline-flex self-start rounded border border-rule p-0.5 font-mono text-[11px] sm:self-auto">
             {(['24h', '7d', 'all'] as const).map((r) => (
               <button
                 key={r}
@@ -333,18 +347,19 @@ export function ProductDetail() {
         </div>
       </div>
 
-      {/* Two tables */}
-      <div className="grid grid-cols-1 border-b border-rule bg-surface xl:grid-cols-2">
-        <div className="flex flex-col border-b border-rule xl:border-b-0 xl:border-r">
+      {/* Two Side-by-Side Tables */}
+      <div className="grid grid-cols-1 gap-4 xl:grid-cols-2">
+        {/* Left Table: Price History */}
+        <div className="flex flex-col overflow-hidden rounded border border-rule bg-surface">
           <TableHeader title="Price extraction history" note={`${chartHistory.length} in range`} />
           <div className="overflow-x-auto">
-            <table className="w-full border-collapse text-left font-mono text-mono-sm">
+            <table className="w-full border-collapse text-left font-mono text-[11px]">
               <thead>
-                <tr className="h-8 border-b border-rule bg-bg text-muted">
-                  <Th>Time</Th>
-                  <Th right>Price</Th>
-                  <Th>Stock</Th>
-                  <Th>Source</Th>
+                <tr className="h-7 border-b border-rule bg-bg text-muted">
+                  <Th>TIME (UTC)</Th>
+                  <Th right>PRICE</Th>
+                  <Th>STOCK</Th>
+                  <Th>METHOD</Th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-rule">
@@ -352,16 +367,16 @@ export function ProductDetail() {
                   <EmptyRow colSpan={4} text="No price points in this range" />
                 ) : (
                   [...chartHistory].reverse().map((h, i) => (
-                    <tr key={i} className="h-8 hover:bg-surface-hover">
+                    <tr key={i} className="h-7.5 transition-colors hover:bg-surface-hover">
                       <Td className="tabular-nums text-ink">{formatTimestamp(h.scraped_at)}</Td>
-                      <Td right className={h.stock === 'out_of_stock' ? 'tabular-nums text-muted' : 'tabular-nums text-ink'}>
+                      <Td right className={h.stock === 'out_of_stock' ? 'tabular-nums text-muted' : 'tabular-nums font-medium text-ink'}>
                         {formatMoney(h.price, h.currency)}
                       </Td>
                       <Td>
                         <span className={STOCK[h.stock].className}>{STOCK[h.stock].label}</span>
                       </Td>
                       <Td className="text-muted">
-                        {h.extraction_source ?? '—'}
+                        {h.extraction_source ?? 'DOM parse'}
                         {h.layout_revision != null && ` · rev ${h.layout_revision}`}
                       </Td>
                     </tr>
@@ -372,17 +387,18 @@ export function ProductDetail() {
           </div>
         </div>
 
-        <div className="flex flex-col">
-          <TableHeader title="Execution & scrape log" note={`${logs.length} attempts`} />
+        {/* Right Table: Scrape Diagnostic Log */}
+        <div className="flex flex-col overflow-hidden rounded border border-rule bg-surface">
+          <TableHeader title="Scrape diagnostic log" note={`${logs.length} attempts`} />
           <div className="overflow-x-auto">
-            <table className="w-full border-collapse text-left font-mono text-mono-sm">
+            <table className="w-full border-collapse text-left font-mono text-[11px]">
               <thead>
-                <tr className="h-8 border-b border-rule bg-bg text-muted">
-                  <Th>Time</Th>
-                  <Th>Attempt</Th>
-                  <Th>Outcome</Th>
-                  <Th right>Duration</Th>
-                  <Th>Detail</Th>
+                <tr className="h-7 border-b border-rule bg-bg text-muted">
+                  <Th>TIME</Th>
+                  <Th>ATTEMPT</Th>
+                  <Th>OUTCOME</Th>
+                  <Th right>DURATION</Th>
+                  <Th>DETAIL</Th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-rule">
@@ -390,7 +406,7 @@ export function ProductDetail() {
                   <EmptyRow colSpan={5} text="No scrape attempts recorded yet" />
                 ) : (
                   logs.map((l, i) => (
-                    <tr key={i} className="h-8 hover:bg-surface-hover">
+                    <tr key={i} className="h-7.5 transition-colors hover:bg-surface-hover">
                       <Td className="tabular-nums text-ink">{formatTimestamp(l.created_at)}</Td>
                       <Td className="tabular-nums text-muted">
                         {l.attempt_no}
@@ -398,14 +414,14 @@ export function ProductDetail() {
                       </Td>
                       <Td>
                         <span className={'inline-flex items-center gap-1.5 font-medium ' + OUTCOME[l.status].text}>
-                          <span className={'inline-block h-2 w-2 rounded-sm ' + OUTCOME[l.status].block} />
+                          <span className={'inline-block h-2 w-2 rounded-[1px] ' + OUTCOME[l.status].block} />
                           {l.status}
                         </span>
                       </Td>
                       <Td right className="tabular-nums text-ink">
                         {formatDuration(l.duration_ms)}
                       </Td>
-                      <Td className={'max-w-[240px] truncate ' + (l.status === 'failed' ? 'text-failed' : 'text-muted')}>
+                      <Td className={'max-w-[200px] truncate ' + (l.status === 'failed' ? 'text-failed' : 'text-muted')}>
                         {logDetail(l)}
                       </Td>
                     </tr>
@@ -416,12 +432,6 @@ export function ProductDetail() {
           </div>
         </div>
       </div>
-
-      {latest == null && (
-        <div className="px-space-lg py-space-md font-mono text-mono-sm text-muted">
-          {nextRun ? `No successful scrape yet — first data expected around ${formatTimestamp(nextRun.toISOString())}.` : 'No successful scrape yet — awaiting the first scheduled run.'}
-        </div>
-      )}
     </div>
   );
 }

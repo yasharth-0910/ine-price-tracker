@@ -5,19 +5,24 @@ import { formatMoney, formatTimestamp } from '../lib/format';
 // Hand-rolled SVG so the exact behaviour the spec asks for is under our control: a thin line with
 // no gradient, a grey band behind out-of-stock stretches, a hard break + red x-axis tick wherever a
 // scheduled scrape failed, and NO interpolation across missing data. Colours are CSS var() tokens
-// (never hex), so the chart tracks the theme. Hover snaps a crosshair to the nearest point (or the
-// nearest failed-scrape marker) and shows its detail. Keyboard nav is intentionally skipped — the
-// price-history table below carries the same data accessibly.
+// (never hex), so the chart tracks the theme.
+//
+// Interaction: the crosshair follows the cursor; the tooltip/dot only appear when the cursor is
+// actually near a marker (within SNAP_PX), so hovering empty space doesn't jump to a far point.
+// Click a point to anchor it, then hover another point to read the change between them (absolute,
+// percent, and time span), coloured green for a drop and red for a rise. Click the anchor again, or
+// click empty space, to clear it. Keyboard nav is skipped; the price-history table carries the same
+// data accessibly.
 
 export interface ChartPoint {
   t: number; // epoch ms
   price: number;
   stock: StockStatus;
-  source: string | null; // extraction_source of that reading
+  source: string | null;
 }
 
 export interface ChartFailure {
-  t: number; // epoch ms of the failed scheduled scrape
+  t: number;
   error_code: string | null;
   error_message: string | null;
   http_status: number | null;
@@ -28,6 +33,7 @@ const H = 280;
 const PAD = { left: 56, right: 16, top: 16, bottom: 30 };
 const PLOT = { x0: PAD.left, x1: W - PAD.right, y0: PAD.top, y1: H - PAD.bottom };
 const GAP_MS = 3 * 60 * 60 * 1000; // >1.5× the 2h cadence ⇒ a missing window, don't bridge it
+const SNAP_PX = 16; // viewBox units, horizontal distance only: select a marker when the cursor is over it
 
 const STOCK_LABEL: Record<StockStatus, string> = {
   in_stock: 'In stock',
@@ -46,6 +52,14 @@ function niceMoney(currency: string) {
 }
 const axisTime = new Intl.DateTimeFormat(undefined, { month: 'short', day: 'numeric', hour: '2-digit' });
 
+// Coarse span for the compare readout (minutes / hours / days).
+function span(ms: number): string {
+  const h = ms / 3_600_000;
+  if (h < 1) return `${Math.round(ms / 60_000)}m`;
+  if (h < 48) return `${h.toFixed(1)}h`;
+  return `${(h / 24).toFixed(1)}d`;
+}
+
 type Hover = { kind: 'point'; p: ChartPoint } | { kind: 'fail'; f: ChartFailure };
 
 export function PriceChart({
@@ -59,7 +73,9 @@ export function PriceChart({
   domain: [number, number];
   currency: string;
 }) {
+  const [cursorX, setCursorX] = useState<number | null>(null);
   const [hover, setHover] = useState<Hover | null>(null);
+  const [anchor, setAnchor] = useState<ChartPoint | null>(null);
 
   if (points.length === 0) {
     return (
@@ -88,8 +104,6 @@ export function PriceChart({
   const sorted = [...points].sort((a, b) => a.t - b.t);
   const fails = failures.filter((f) => f.t >= xmin && f.t <= xmax).sort((a, b) => a.t - b.t);
 
-  // Continuous segments — break on a failed scrape between two points, or a gap larger than one
-  // expected window. A single-point segment renders only as a dot.
   const segments: ChartPoint[][] = [];
   let seg: ChartPoint[] = [];
   for (const p of sorted) {
@@ -102,7 +116,6 @@ export function PriceChart({
   }
   if (seg.length) segments.push(seg);
 
-  // Contiguous out-of-stock runs → grey bands behind the line.
   const bands: Array<[number, number]> = [];
   for (let i = 0; i < sorted.length; ) {
     if (sorted[i]!.stock === 'out_of_stock') {
@@ -119,12 +132,11 @@ export function PriceChart({
   const xTicks = 5;
   const gridX = Array.from({ length: xTicks }, (_, i) => xmin + (xspan * i) / (xTicks - 1));
 
-  // Snap the crosshair to whichever marker (a data point or a failed-scrape tick) is nearest the cursor.
-  function onMove(e: React.MouseEvent<SVGSVGElement>) {
-    const rect = e.currentTarget.getBoundingClientRect();
-    const vbX = ((e.clientX - rect.left) / rect.width) * W;
+  // Nearest marker (point or failure) to a viewBox x, within SNAP_PX. Null when the cursor is in
+  // empty space, so we don't jump the readout to a distant point.
+  function nearest(vbX: number): Hover | null {
     let best: Hover | null = null;
-    let bestDx = Infinity;
+    let bestDx = SNAP_PX;
     for (const p of sorted) {
       const dx = Math.abs(sx(p.t) - vbX);
       if (dx < bestDx) {
@@ -139,12 +151,41 @@ export function PriceChart({
         best = { kind: 'fail', f };
       }
     }
-    setHover(best);
+    return best;
   }
 
-  const hoverT = hover ? (hover.kind === 'point' ? hover.p.t : hover.f.t) : null;
-  const hoverX = hoverT != null ? sx(hoverT) : null;
-  const leftPct = hoverX != null ? (hoverX / W) * 100 : 0;
+  function toVbX(e: React.MouseEvent<SVGSVGElement>): number {
+    const rect = e.currentTarget.getBoundingClientRect();
+    return ((e.clientX - rect.left) / rect.width) * W;
+  }
+
+  function onMove(e: React.MouseEvent<SVGSVGElement>) {
+    const vbX = toVbX(e);
+    setCursorX(vbX);
+    setHover(nearest(vbX));
+  }
+
+  function onClick(e: React.MouseEvent<SVGSVGElement>) {
+    const hit = nearest(toVbX(e));
+    if (!hit || hit.kind !== 'point') {
+      setAnchor(null); // click empty space (or a failure tick) clears the comparison
+      return;
+    }
+    setAnchor((cur) => (cur && cur.t === hit.p.t ? null : hit.p)); // toggle / move
+  }
+
+  const delta =
+    hover?.kind === 'point' && anchor && anchor.t !== hover.p.t
+      ? {
+          abs: hover.p.price - anchor.price,
+          pct: anchor.price ? ((hover.p.price - anchor.price) / anchor.price) * 100 : 0,
+          spanMs: Math.abs(hover.p.t - anchor.t),
+        }
+      : null;
+  const deltaClass = delta ? (delta.abs < 0 ? 'text-ok' : delta.abs > 0 ? 'text-failed' : 'text-muted') : '';
+
+  const tipT = hover ? (hover.kind === 'point' ? hover.p.t : hover.f.t) : null;
+  const leftPct = tipT != null ? (sx(tipT) / W) * 100 : 0;
 
   return (
     <div className="overflow-x-auto rounded border border-rule bg-surface p-space-sm">
@@ -154,9 +195,12 @@ export function PriceChart({
           className="block h-72 w-full cursor-crosshair select-none font-mono"
           style={{ shapeRendering: 'geometricPrecision' }}
           onMouseMove={onMove}
-          onMouseLeave={() => setHover(null)}
+          onMouseLeave={() => {
+            setCursorX(null);
+            setHover(null);
+          }}
+          onClick={onClick}
         >
-          {/* Out-of-stock bands (behind everything) */}
           {bands.map(([a, b], i) => (
             <rect
               key={`band-${i}`}
@@ -169,7 +213,6 @@ export function PriceChart({
             />
           ))}
 
-          {/* Y grid + labels */}
           {gridY.map((v, i) => (
             <g key={`gy-${i}`}>
               <line x1={PLOT.x0} x2={PLOT.x1} y1={sy(v)} y2={sy(v)} stroke="var(--rule)" strokeDasharray="2 3" />
@@ -179,7 +222,6 @@ export function PriceChart({
             </g>
           ))}
 
-          {/* Failed-scrape markers: faint dashed guide + a small solid tick on the x-axis */}
           {fails.map((f, i) => (
             <g key={`fail-${i}`}>
               <line x1={sx(f.t)} x2={sx(f.t)} y1={PLOT.y0} y2={PLOT.y1} stroke="var(--status-failed)" strokeOpacity={0.3} strokeDasharray="2 2" />
@@ -187,7 +229,6 @@ export function PriceChart({
             </g>
           ))}
 
-          {/* Price line — one polyline per continuous segment, never bridging a gap */}
           {segments.map((s, i) =>
             s.length >= 2 ? (
               <polyline
@@ -205,17 +246,22 @@ export function PriceChart({
             <circle key={`pt-${i}`} cx={sx(p.t)} cy={sy(p.price)} r={2} fill="var(--ink)" />
           ))}
 
-          {/* Hover crosshair + highlighted point */}
-          {hover && hoverX != null && (
+          {/* Anchor marker: solid guide + ringed dot */}
+          {anchor && (
             <g>
-              <line x1={hoverX} x2={hoverX} y1={PLOT.y0} y2={PLOT.y1} stroke="var(--muted)" strokeDasharray="2 2" />
-              {hover.kind === 'point' && (
-                <circle cx={hoverX} cy={sy(hover.p.price)} r={3.5} fill="var(--surface)" stroke="var(--ink)" strokeWidth={1.5} />
-              )}
+              <line x1={sx(anchor.t)} x2={sx(anchor.t)} y1={PLOT.y0} y2={PLOT.y1} stroke="var(--muted)" strokeOpacity={0.6} />
+              <circle cx={sx(anchor.t)} cy={sy(anchor.price)} r={4} fill="var(--ink)" stroke="var(--surface)" strokeWidth={1.5} />
             </g>
           )}
 
-          {/* X baseline + time labels */}
+          {/* Hover crosshair follows the cursor; dot only when snapped to a point */}
+          {cursorX != null && cursorX >= PLOT.x0 && cursorX <= PLOT.x1 && (
+            <line x1={cursorX} x2={cursorX} y1={PLOT.y0} y2={PLOT.y1} stroke="var(--muted)" strokeDasharray="2 2" />
+          )}
+          {hover?.kind === 'point' && (
+            <circle cx={sx(hover.p.t)} cy={sy(hover.p.price)} r={3.5} fill="var(--surface)" stroke="var(--ink)" strokeWidth={1.5} />
+          )}
+
           <line x1={PLOT.x0} x2={PLOT.x1} y1={PLOT.y1} y2={PLOT.y1} stroke="var(--rule)" />
           {gridX.map((t, i) => (
             <text
@@ -231,7 +277,7 @@ export function PriceChart({
           ))}
         </svg>
 
-        {/* Tooltip (HTML overlay, positioned by % so it tracks the scaled SVG) */}
+        {/* Tooltip */}
         {hover && (
           <div
             className="pointer-events-none absolute top-2 z-10 whitespace-nowrap rounded border border-rule bg-surface px-space-sm py-1 font-mono text-mono-sm"
@@ -243,17 +289,20 @@ export function PriceChart({
                 <div className="font-medium text-ink">{formatMoney(String(hover.p.price), currency)}</div>
                 <div className={STOCK_CLASS[hover.p.stock]}>{STOCK_LABEL[hover.p.stock]}</div>
                 <div className="text-muted">{hover.p.source ?? '—'}</div>
+                {delta && (
+                  <div className={'mt-1 border-t border-rule pt-1 ' + deltaClass}>
+                    {delta.abs > 0 ? '+' : ''}
+                    {formatMoney(String(delta.abs.toFixed(2)), currency)} ({delta.pct > 0 ? '+' : ''}
+                    {delta.pct.toFixed(1)}%) over {span(delta.spanMs)}
+                  </div>
+                )}
               </>
             ) : (
               <>
                 <div className="font-medium text-failed">Failed scrape</div>
                 <div className="text-muted">{formatTimestamp(new Date(hover.f.t).toISOString())}</div>
                 <div className="text-failed">
-                  {[
-                    hover.f.error_code,
-                    hover.f.http_status != null ? `http ${hover.f.http_status}` : null,
-                    hover.f.error_message,
-                  ]
+                  {[hover.f.error_code, hover.f.http_status != null ? `http ${hover.f.http_status}` : null, hover.f.error_message]
                     .filter(Boolean)
                     .join(' · ') || 'failed'}
                 </div>
@@ -261,6 +310,13 @@ export function PriceChart({
             )}
           </div>
         )}
+
+        {/* Compare hint / anchor state */}
+        <div className="pointer-events-none absolute bottom-1 left-2 font-mono text-mono-sm text-muted">
+          {anchor
+            ? `Anchor ${money(anchor.price)} · hover another point to compare · click it again to clear`
+            : 'Click a point to compare'}
+        </div>
       </div>
     </div>
   );
