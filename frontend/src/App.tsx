@@ -57,9 +57,6 @@ export default function App() {
               <Link to="/" className="font-sans text-[14px] font-semibold tracking-tight text-ink">
                 TrackScrape
               </Link>
-              <span className="rounded border border-rule bg-bg px-1.5 py-0.2 font-mono text-[9px] uppercase tracking-wider text-muted">
-                v2.4
-              </span>
             </div>
 
             <nav className="flex items-center gap-1 font-mono text-[12px]">
@@ -106,8 +103,6 @@ export default function App() {
           <div className="flex items-center gap-3">
             <div className="flex items-center gap-1.5">
               <span className="h-1.5 w-1.5 rounded-full bg-ok" />
-              <span className="text-ink">Database:</span>
-              <span>Supabase Postgres</span>
             </div>
             <div className="hidden h-3 w-px bg-rule sm:block" />
             <div className="hidden sm:block">
@@ -119,9 +114,6 @@ export default function App() {
             </div>
           </div>
           <div className="flex items-center gap-3">
-            <span className="flex items-center gap-1 text-ok">
-              ✓ Storage synced
-            </span>
             <div className="h-3 w-px bg-rule" />
             <LiveClock />
           </div>
