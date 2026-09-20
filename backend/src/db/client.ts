@@ -8,7 +8,10 @@ import { env } from '../lib/env.js';
 // for postgres.js + transaction pooler; harmless on a direct/session connection too.
 export const sql = postgres(env.DATABASE_URL, {
   max: 5,
-  idle_timeout: 20,
+  idle_timeout: 15,
   connect_timeout: 10,
+  max_lifetime: 60,
   prepare: false,
+  fetch_types: false,
+  onnotice: () => {},
 });
