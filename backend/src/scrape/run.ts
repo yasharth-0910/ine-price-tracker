@@ -44,18 +44,19 @@ export async function executeRun(
   runId: string,
   { productIds, force = false }: { productIds?: string[]; force?: boolean } = {},
 ): Promise<RunResult> {
-  const products = productIds?.length
-    ? await sql<ProductInput[]>`
-        select id, source_product_id, url from products where id = any(${productIds})`
-    : await sql<ProductInput[]>`
-        select id, source_product_id, url from products where tracking_enabled = true order by created_at`;
-
-  await sql`update scrape_runs set products_total = ${products.length} where id = ${runId}`;
-
   const counts = { succeeded: 0, failed: 0, skipped: 0 };
   const stopPing = startSelfPing();
+  let products: ProductInput[] = [];
 
   try {
+    products = productIds?.length
+      ? await sql<ProductInput[]>`
+          select id, source_product_id, url from products where id in ${sql(productIds)}`
+      : await sql<ProductInput[]>`
+          select id, source_product_id, url from products where tracking_enabled = true order by created_at`;
+
+    await sql`update scrape_runs set products_total = ${products.length} where id = ${runId}`;
+
     // One fresh browser per batch of BROWSER_RECYCLE_EVERY products, closed before the next batch,
     // so peak RAM stays well under Render's 512 MB ceiling and a crashed browser costs one batch,
     // not the whole run. Concurrency is still 1 (one product at a time within a batch).
@@ -84,12 +85,15 @@ export async function executeRun(
         await fetcher.dispose().catch(() => {});
       }
     }
+  } catch (err) {
+    logger.error({ err, runId }, 'executeRun unhandled error');
+    throw err;
   } finally {
     stopPing();
     // INV-8: the run is finalised even if every product failed.
     await sql`update scrape_runs set finished_at = now(),
       succeeded = ${counts.succeeded}, failed = ${counts.failed}, skipped = ${counts.skipped}
-      where id = ${runId}`;
+      where id = ${runId}`.catch(() => {});
   }
 
   // Slowest single attempt in the run. Over many unattended runs this is the number that says
